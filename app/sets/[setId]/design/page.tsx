@@ -16,7 +16,7 @@ export default async function DesignPage({ params }: { params: { setId: string }
 
   const { data: cards } = await supabase
     .from('cards')
-    .select('id,set_id,title,canvas_json,order_index')
+    .select('id,set_id,title,canvas_json,order_index,answers(id,type,schema_json)')
     .eq('set_id', setId)
     .order('order_index', { ascending: true });
 
