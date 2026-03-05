@@ -13,6 +13,7 @@ export interface CanvasNode {
   points?: number[];
   text?: string;
   src?: string;
+  fontFamily?: string;
   fontSize?: number;
   fontWeight?: string;
   fill?: string;

@@ -6,11 +6,12 @@ import { createClient } from '@/lib/supabase/client';
 import { AnswerType, CanvasState, CardRecord } from '@/lib/types/domain';
 import { useEditorStore } from '@/lib/store/editorStore';
 import { CardNavigator } from '@/components/CardNavigator';
-import { AlignControls, ImageTool, LayerList, ShapeTool, TemplateControls, TextTool } from '@/components/DesignSidebar';
-import { AdsSlot } from '@/components/AdsSlot';
 import { ClozeEditor, DropdownEditor, FreeFormEditor, MCQEditor } from '@/components/AnswerBuilder';
+import { Input } from '@/components/Common/Input';
 import { Select } from '@/components/Common/Select';
+import { Button } from '@/components/Common/Button';
 import { clozeSchema, dropdownSchema, freeFormSchema, mcqSchema } from '@/lib/utils/answerEvaluation';
+import { CANVAS_MIN_HEIGHT, CANVAS_MIN_WIDTH, clampCanvasSize } from '@/lib/utils/canvas';
 
 const CanvasStage = dynamic(
   () => import('@/components/CanvasStage').then((module) => module.CanvasStage),
@@ -27,11 +28,31 @@ type Props = {
   >;
 };
 
+type CanvasTool = 'select' | 'move' | 'text';
+
 const emptyCanvas: CanvasState = {
   width: 1024,
   height: 576,
   nodes: []
 };
+
+const createCanvas = (width: number, height: number): CanvasState => ({
+  width,
+  height,
+  nodes: []
+});
+
+const DEFAULT_CANVAS_MAX_WIDTH = 1600;
+const DEFAULT_CANVAS_MAX_HEIGHT = 1000;
+
+const FONT_OPTIONS = [
+  { value: 'Arial', label: 'Arial' },
+  { value: 'Georgia', label: 'Georgia' },
+  { value: 'Trebuchet MS', label: 'Trebuchet MS' },
+  { value: 'Courier New', label: 'Courier New' }
+];
+
+const FONT_SIZE_OPTIONS = [16, 20, 24, 28, 32, 40, 48, 56];
 
 type FreeformEditorState = {
   accepted: string;
@@ -193,8 +214,11 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
   const supabase = useMemo(() => createClient(), []);
   const [cards, setCards] = useState<Props['initialCards']>(initialCards);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [templateName, setTemplateName] = useState('');
-  const [textSettings, setTextSettings] = useState({ text: 'New text', fontSize: 32, fontWeight: '400', color: '#0f172a' });
+  const [activeTool, setActiveTool] = useState<CanvasTool>('select');
+  const [canvasSize, setCanvasSize] = useState({ width: emptyCanvas.width, height: emptyCanvas.height });
+  const [canvasBounds, setCanvasBounds] = useState({ maxWidth: DEFAULT_CANVAS_MAX_WIDTH, maxHeight: DEFAULT_CANVAS_MAX_HEIGHT });
+  const [isApplyingCanvasSize, setIsApplyingCanvasSize] = useState(false);
+  const [textSettings, setTextSettings] = useState({ fontFamily: 'Arial', fontSize: 32, fontWeight: '400', color: '#0f172a' });
   const [answerType, setAnswerType] = useState<AnswerType>('freeform');
   const [answerDraft, setAnswerDraft] = useState<AnswerDraft>(createDefaultDraft());
   const [answerLastModifiedAt, setAnswerLastModifiedAt] = useState<number | null>(null);
@@ -209,14 +233,67 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
   const lastModifiedAt = useEditorStore((state) => state.lastModifiedAt);
   const markPersisted = useEditorStore((state) => state.markPersisted);
 
+  const getViewportCanvasBounds = () => {
+    if (typeof window === 'undefined') {
+      return { maxWidth: DEFAULT_CANVAS_MAX_WIDTH, maxHeight: DEFAULT_CANVAS_MAX_HEIGHT };
+    }
+
+    return {
+      maxWidth: Math.max(CANVAS_MIN_WIDTH, Math.floor(window.innerWidth - 96)),
+      maxHeight: Math.max(CANVAS_MIN_HEIGHT, Math.floor(window.innerHeight - 220))
+    };
+  };
+
+  const normalizeCanvasSize = (size: { width: number; height: number }) =>
+    clampCanvasSize(size, {
+      minWidth: CANVAS_MIN_WIDTH,
+      minHeight: CANVAS_MIN_HEIGHT,
+      maxWidth: canvasBounds.maxWidth,
+      maxHeight: canvasBounds.maxHeight
+    });
+
+  const updateCanvasSize = (nextSize: { width: number; height: number }) => {
+    const normalized = normalizeCanvasSize(nextSize);
+    setCanvasSize(normalized);
+
+    if (canvas.width === normalized.width && canvas.height === normalized.height) return;
+
+    setCanvas({
+      ...canvas,
+      width: normalized.width,
+      height: normalized.height
+    });
+  };
+
+  useEffect(() => {
+    const updateBounds = () => setCanvasBounds(getViewportCanvasBounds());
+    updateBounds();
+    window.addEventListener('resize', updateBounds);
+    return () => window.removeEventListener('resize', updateBounds);
+  }, []);
+
   useEffect(() => {
     if (!currentCard) {
       setCanvas(emptyCanvas, false);
+      setCanvasSize({ width: emptyCanvas.width, height: emptyCanvas.height });
       return;
     }
 
-    setCanvas(currentCard.canvas_json, false);
-  }, [currentCard, setCanvas]);
+    const normalized = normalizeCanvasSize({
+      width: currentCard.canvas_json.width,
+      height: currentCard.canvas_json.height
+    });
+
+    setCanvas(
+      {
+        ...currentCard.canvas_json,
+        width: normalized.width,
+        height: normalized.height
+      },
+      false
+    );
+    setCanvasSize(normalized);
+  }, [canvasBounds.maxHeight, canvasBounds.maxWidth, currentCard, setCanvas]);
 
   useEffect(() => {
     if (!currentCard) {
@@ -296,9 +373,10 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
 
   const addCard = async () => {
     const orderIndex = cards.length;
+    const baseCanvas = createCanvas(canvasSize.width, canvasSize.height);
     const { data } = await supabase
       .from('cards')
-      .insert({ set_id: setId, title: `Card ${orderIndex + 1}`, canvas_json: emptyCanvas, order_index: orderIndex })
+      .insert({ set_id: setId, title: `Card ${orderIndex + 1}`, canvas_json: baseCanvas, order_index: orderIndex })
       .select('id,title,canvas_json,order_index,set_id')
       .single();
 
@@ -308,23 +386,69 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     }
   };
 
-  const upsertNode = (node: CanvasState['nodes'][number]) => {
-    setCanvas({ ...canvas, nodes: [...canvas.nodes, node] });
+  const updateSelectedTextNodes = (updates: Partial<Pick<(typeof canvas.nodes)[number], 'fontFamily' | 'fontSize' | 'fontWeight' | 'fill'>>) => {
+    const selected = new Set(selectedIds);
+    if (selected.size === 0) return;
+
+    let hasChanges = false;
+    const nextNodes = canvas.nodes.map((node) => {
+      if (!selected.has(node.id) || node.type !== 'text') return node;
+      hasChanges = true;
+      return { ...node, ...updates };
+    });
+
+    if (hasChanges) {
+      setCanvas({ ...canvas, nodes: nextNodes });
+    }
   };
 
-  const moveLayer = (id: string, direction: 'up' | 'down') => {
-    const current = [...canvas.nodes];
-    const index = current.findIndex((node) => node.id === id);
-    if (index < 0) return;
-    const nextIndex = direction === 'up' ? Math.min(current.length - 1, index + 1) : Math.max(0, index - 1);
-    const [item] = current.splice(index, 1);
-    current.splice(nextIndex, 0, item);
-    setCanvas({ ...canvas, nodes: current });
+  const parseNumber = (value: string, fallback: number) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  const applyCanvasSizeToSet = async () => {
+    if (cards.length === 0 || isApplyingCanvasSize) return;
+
+    const { width, height } = normalizeCanvasSize(canvasSize);
+    setCanvasSize({ width, height });
+    setIsApplyingCanvasSize(true);
+
+    const nextCards = cards.map((card) => ({
+      ...card,
+      canvas_json: {
+        ...card.canvas_json,
+        width,
+        height
+      }
+    }));
+
+    setCards(nextCards);
+    setCanvas({
+      ...canvas,
+      width,
+      height
+    });
+
+    await Promise.all(
+      nextCards.map((card) =>
+        supabase
+          .from('cards')
+          .update({ canvas_json: card.canvas_json })
+          .eq('id', card.id)
+          .eq('set_id', setId)
+      )
+    );
+
+    setIsApplyingCanvasSize(false);
   };
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold">Design View · {setTitle}</h1>
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <h1 className="text-2xl font-semibold">Design View · {setTitle}</h1>
+        <p className="mt-1 text-sm text-slate-500">Build premium cards with a true design workflow: direct editing, structured layers, and precise positioning.</p>
+      </div>
       <CardNavigator
         index={currentIndex}
         total={Math.max(cards.length, 1)}
@@ -334,58 +458,144 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
         onDuplicate={duplicateSelection}
         onDelete={deleteSelection}
       />
-      <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
-        <aside className="space-y-3">
-          <TextTool
-            text={textSettings.text}
-            fontSize={textSettings.fontSize}
-            fontWeight={textSettings.fontWeight}
-            color={textSettings.color}
-            onTextChange={(text) => setTextSettings((previous) => ({ ...previous, text }))}
-            onFontSizeChange={(fontSize) => setTextSettings((previous) => ({ ...previous, fontSize }))}
-            onFontWeightChange={(fontWeight) => setTextSettings((previous) => ({ ...previous, fontWeight }))}
-            onColorChange={(color) => setTextSettings((previous) => ({ ...previous, color }))}
-          />
-          <ShapeTool
-            onAddRect={() => upsertNode({ id: crypto.randomUUID(), type: 'rect', x: 80, y: 80, width: 180, height: 100 })}
-            onAddCircle={() => upsertNode({ id: crypto.randomUUID(), type: 'circle', x: 120, y: 120, radius: 50 })}
-            onAddLine={() => upsertNode({ id: crypto.randomUUID(), type: 'line', x: 150, y: 150, points: [0, 0, 140, 0] })}
-          />
-          <ImageTool
-            onImageUrlSubmit={(src) =>
-              upsertNode({ id: crypto.randomUUID(), type: 'image', x: 120, y: 120, width: 220, height: 140, src })
-            }
-          />
-          <AlignControls onAlign={() => undefined} />
-          <LayerList
-            nodes={canvas.nodes}
+      <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)_420px]">
+        <aside className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="space-y-3">
+            <Button
+              variant={activeTool === 'move' ? 'primary' : 'secondary'}
+              onClick={() => setActiveTool((current) => (current === 'move' ? 'select' : 'move'))}
+              aria-label="Move tool"
+              className="w-full"
+            >
+              <span className="flex items-center justify-center gap-2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 3v18M3 12h18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="m12 3 3 3m-3-3-3 3M12 21l3-3m-3 3-3-3M3 12l3-3m-3 3 3 3M21 12l-3-3m3 3-3 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Move
+              </span>
+            </Button>
+            <Button
+              variant={activeTool === 'text' ? 'primary' : 'secondary'}
+              onClick={() => setActiveTool((current) => (current === 'text' ? 'select' : 'text'))}
+              aria-label="Text tool"
+              className="w-full"
+            >
+              <span className="flex items-center justify-center gap-2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M4 6h16M12 6v12M8 18h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Text
+              </span>
+            </Button>
+            {activeTool === 'text' ? (
+              <div className="space-y-2 rounded-md border border-slate-200 p-2 dark:border-slate-700">
+                <Select
+                  value={textSettings.fontFamily}
+                  onChange={(event) => {
+                    const fontFamily = event.target.value;
+                    setTextSettings((previous) => ({ ...previous, fontFamily }));
+                    updateSelectedTextNodes({ fontFamily });
+                  }}
+                  aria-label="Font family"
+                >
+                  {FONT_OPTIONS.map((font) => (
+                    <option key={font.value} value={font.value}>
+                      {font.label}
+                    </option>
+                  ))}
+                </Select>
+                <Select
+                  value={String(textSettings.fontSize)}
+                  onChange={(event) => {
+                    const fontSize = parseNumber(event.target.value, textSettings.fontSize);
+                    setTextSettings((previous) => ({ ...previous, fontSize }));
+                    updateSelectedTextNodes({ fontSize });
+                  }}
+                  aria-label="Font size"
+                >
+                  {FONT_SIZE_OPTIONS.map((size) => (
+                    <option key={size} value={size}>
+                      {size}px
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            ) : null}
+          </div>
+        </aside>
+        <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
+            Active tool: <span className="font-semibold uppercase">{activeTool}</span>
+          </div>
+          <CanvasStage
+            canvas={canvas}
             selectedIds={selectedIds}
-            onSelect={(id) => setSelectedIds([id])}
-            onMove={moveLayer}
-            onToggleLock={(id) =>
-              setCanvas({
-                ...canvas,
-                nodes: canvas.nodes.map((node) => (node.id === id ? { ...node, locked: !node.locked } : node))
-              })
-            }
-            onToggleVisibility={(id) =>
-              setCanvas({
-                ...canvas,
-                nodes: canvas.nodes.map((node) => (node.id === id ? { ...node, hidden: !node.hidden } : node))
-              })
-            }
+            activeTool={activeTool}
+            textDefaults={textSettings}
+            onSelectIds={setSelectedIds}
+            onCanvasChange={(nextCanvas) => setCanvas(nextCanvas)}
           />
-          <TemplateControls
-            templateName={templateName}
-            onTemplateNameChange={setTemplateName}
-            onSaveTemplate={async () => {
-              if (!templateName.trim()) return;
-              await supabase.from('templates').insert({ name: templateName, canvas_json: canvas });
-            }}
-            onApplyTemplate={() => {
-              // TODO: Fetch and apply selected template from DB picker.
-            }}
-          />
+        </section>
+        <aside className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <section className="space-y-2 rounded-md border border-slate-200 p-3 dark:border-slate-700">
+            <h3 className="text-sm font-semibold">Canvas Size (Set Level)</h3>
+            <div className="grid grid-cols-3 gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => updateCanvasSize({ width: 1024, height: 576 })}
+              >
+                16:9
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => updateCanvasSize({ width: 900, height: 900 })}
+              >
+                1:1
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => updateCanvasSize({ width: 1080, height: 1350 })}
+              >
+                4:5
+              </Button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Input
+                type="number"
+                min={CANVAS_MIN_WIDTH}
+                max={canvasBounds.maxWidth}
+                value={canvasSize.width}
+                onChange={(event) =>
+                  updateCanvasSize({
+                    width: parseNumber(event.target.value, canvasSize.width),
+                    height: canvasSize.height
+                  })
+                }
+                aria-label="Canvas width"
+              />
+              <Input
+                type="number"
+                min={CANVAS_MIN_HEIGHT}
+                max={canvasBounds.maxHeight}
+                value={canvasSize.height}
+                onChange={(event) =>
+                  updateCanvasSize({
+                    width: canvasSize.width,
+                    height: parseNumber(event.target.value, canvasSize.height)
+                  })
+                }
+                aria-label="Canvas height"
+              />
+            </div>
+            <p className="text-xs text-slate-500">
+              Limits: {CANVAS_MIN_WIDTH}-{canvasBounds.maxWidth}px wide, {CANVAS_MIN_HEIGHT}-{canvasBounds.maxHeight}px tall (viewport-aware).
+            </p>
+            <Button onClick={applyCanvasSizeToSet} disabled={isApplyingCanvasSize}>
+              {isApplyingCanvasSize ? 'Applying...' : 'Apply to all cards'}
+            </Button>
+          </section>
+
           <section className="space-y-2 rounded-md border border-slate-200 p-3 dark:border-slate-700">
             <h2 className="text-sm font-semibold">Answer Builder</h2>
             <Select
@@ -444,33 +654,7 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
               />
             ) : null}
           </section>
-          <AdsSlot />
         </aside>
-        <div className="space-y-2">
-          <button
-            className="focus-ring rounded-md bg-blue-600 px-3 py-2 text-sm text-white"
-            onClick={() =>
-              upsertNode({
-                id: crypto.randomUUID(),
-                type: 'text',
-                x: 120,
-                y: 120,
-                text: textSettings.text,
-                fontSize: textSettings.fontSize,
-                fontWeight: textSettings.fontWeight,
-                fill: textSettings.color
-              })
-            }
-          >
-            Add text
-          </button>
-          <CanvasStage
-            canvas={canvas}
-            selectedIds={selectedIds}
-            onSelectIds={setSelectedIds}
-            onCanvasChange={(nextCanvas) => setCanvas(nextCanvas)}
-          />
-        </div>
       </div>
     </div>
   );

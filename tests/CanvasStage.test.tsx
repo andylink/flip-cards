@@ -3,7 +3,29 @@ import { describe, expect, it, vi } from 'vitest';
 import { CanvasStage } from '@/components/CanvasStage';
 
 vi.mock('react-konva', () => ({
-  Stage: ({ children }: { children: React.ReactNode }) => <div data-testid="stage">{children}</div>,
+  Stage: ({ children, onMouseDown }: { children: React.ReactNode; onMouseDown?: (event: unknown) => void }) => (
+    <div
+      data-testid="stage"
+      onMouseDown={() => {
+        const stage = {
+          getPointerPosition: () => ({ x: 40, y: 20 })
+        };
+
+        onMouseDown?.({
+          target: {
+            attrs: {},
+            getStage: () => stage
+          },
+          evt: {
+            offsetX: 40,
+            offsetY: 20
+          }
+        });
+      }}
+    >
+      {children}
+    </div>
+  ),
   Layer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   Text: () => <div data-testid="text-node" />,
   Rect: () => <div data-testid="rect-node" />,
@@ -24,6 +46,8 @@ describe('CanvasStage', () => {
           nodes: [{ id: '1', type: 'text', x: 10, y: 10, text: 'Hello' }]
         }}
         selectedIds={['1']}
+        activeTool="select"
+        textDefaults={{ fontFamily: 'Arial', fontSize: 24, fontWeight: '400', color: '#0f172a' }}
         onSelectIds={vi.fn()}
         onCanvasChange={onCanvasChange}
       />
@@ -32,5 +56,41 @@ describe('CanvasStage', () => {
     expect(screen.getByTestId('stage')).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'ArrowRight' });
     expect(onCanvasChange).toHaveBeenCalled();
+  });
+
+  it('adds a text node when clicking the canvas in text mode', () => {
+    const onCanvasChange = vi.fn();
+    const onSelectIds = vi.fn();
+
+    render(
+      <CanvasStage
+        canvas={{
+          width: 100,
+          height: 100,
+          nodes: []
+        }}
+        selectedIds={[]}
+        activeTool="text"
+        textDefaults={{ fontFamily: 'Arial', fontSize: 24, fontWeight: '400', color: '#0f172a' }}
+        onSelectIds={onSelectIds}
+        onCanvasChange={onCanvasChange}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('stage'));
+
+    expect(onCanvasChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nodes: [
+          expect.objectContaining({
+            type: 'text',
+            x: 40,
+            y: 24,
+            text: ''
+          })
+        ]
+      })
+    );
+    expect(onSelectIds).toHaveBeenCalledWith([expect.any(String)]);
   });
 });

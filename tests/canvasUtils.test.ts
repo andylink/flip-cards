@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { snapToGrid, serializeCanvas, deserializeCanvas } from '@/lib/utils/canvas';
+import { clampCanvasSize, snapToGrid, serializeCanvas, deserializeCanvas } from '@/lib/utils/canvas';
 import { CanvasState } from '@/lib/types/domain';
 
 describe('canvas utils', () => {
@@ -15,5 +15,18 @@ describe('canvas utils', () => {
       nodes: [{ id: '1', type: 'text', x: 0, y: 0 }]
     };
     expect(deserializeCanvas(serializeCanvas(canvas))).toEqual(canvas);
+  });
+
+  it('clamps canvas size to provided bounds', () => {
+    expect(
+      clampCanvasSize(
+        { width: 2000, height: 100 },
+        { minWidth: 320, minHeight: 240, maxWidth: 1400, maxHeight: 900 }
+      )
+    ).toEqual({ width: 1400, height: 240 });
+  });
+
+  it('rounds canvas dimensions to integers', () => {
+    expect(clampCanvasSize({ width: 800.6, height: 600.2 })).toEqual({ width: 801, height: 600 });
   });
 });
