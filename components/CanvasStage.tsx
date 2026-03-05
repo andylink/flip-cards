@@ -66,6 +66,12 @@ type NodeBounds = {
   height: number;
 };
 
+type HitCycleState = {
+  x: number;
+  y: number;
+  hitIds: string[];
+};
+
 const TEXT_RIGHT_PADDING = 16;
 
 const INLINE_BOLD_MARKER = '**';
@@ -404,10 +410,9 @@ function CanvasImageNode({
 function drawNode(
   node: CanvasNode,
   canvasWidth: number,
-  selectedIds: string[],
   activeTool: CanvasTool,
   editingNodeId: string | null,
-  onSelectIds: (ids: string[]) => void,
+  onSelectFromClick: (event: { evt: MouseEvent; target: any }, fallbackNodeId: string) => string[],
   onStartTextEdit: (node: CanvasNode) => void,
   onMove: (id: string, x: number, y: number) => void,
   onResize: (nodeId: string, nextNode: CanvasNode) => void
@@ -422,8 +427,7 @@ function drawNode(
       if (activeTool === 'text' && node.type !== 'text') {
         return;
       }
-      const additive = event.evt.shiftKey;
-      onSelectIds(additive ? [...new Set([...selectedIds, node.id])] : [node.id]);
+      onSelectFromClick(event as { evt: MouseEvent; target: any }, node.id);
     },
     onDragEnd: (event: { target: { x: () => number; y: () => number } }) =>
       onMove(node.id, snapToGrid(event.target.x(), GRID), snapToGrid(event.target.y(), GRID))
@@ -439,10 +443,8 @@ function drawNode(
     const textClickHandler = (event: any) => {
       // prevent bubbling to Stage so edit isn’t interrupted by selection/background handlers
       event.cancelBubble = true;
-      // keep selection predictable
-      const additive = event.evt.shiftKey;
-      onSelectIds(additive ? [node.id, ...selectedIds] : [node.id]);
-      if (activeTool === 'text' && !event.evt.shiftKey) {
+      const nextSelection = onSelectFromClick(event as { evt: MouseEvent; target: any }, node.id);
+      if (activeTool === 'text' && !event.evt.shiftKey && nextSelection[0] === node.id) {
         onStartTextEdit(node);
       }
     };
@@ -626,6 +628,7 @@ export function CanvasStage({
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const layerRef = useRef<any>(null);
   const transformerRef = useRef<any>(null);
+  const hitCycleRef = useRef<HitCycleState | null>(null);
   const [viewportWidth, setViewportWidth] = useState<number>(canvas.width + viewportPadding + cardChromePadding);
   const [viewportHeight, setViewportHeight] = useState<number>(900);
 
@@ -820,6 +823,80 @@ export function CanvasStage({
     }
 
     onSelectIds([]);
+    hitCycleRef.current = null;
+  };
+
+  const resolveHitNodeIds = (event: { target: any }): { hitIds: string[]; pointer: { x: number; y: number } | null } => {
+    const stage = event.target?.getStage?.();
+    const pointer = stage?.getPointerPosition?.() ?? null;
+    if (!stage || !pointer || typeof stage.getAllIntersections !== 'function') {
+      return { hitIds: [], pointer };
+    }
+
+    const intersections = stage.getAllIntersections(pointer) as any[];
+    if (intersections.length === 0) {
+      return { hitIds: [], pointer };
+    }
+
+    const nodeIds = new Set(canvas.nodes.map((node) => node.id));
+    const zIndexById = new Map(canvas.nodes.map((node, index) => [node.id, index]));
+    const hitIdSet = new Set<string>();
+
+    intersections.forEach((intersection) => {
+      let current = intersection;
+      while (current) {
+        const id = typeof current.id === 'function' ? current.id() : '';
+        if (id && nodeIds.has(id)) {
+          hitIdSet.add(id);
+          break;
+        }
+        current = typeof current.getParent === 'function' ? current.getParent() : null;
+      }
+    });
+
+    const hitIds = Array.from(hitIdSet).sort((a, b) => (zIndexById.get(b) ?? -1) - (zIndexById.get(a) ?? -1));
+    return { hitIds, pointer };
+  };
+
+  const resolveNodeSelectionFromClick = (event: { evt: MouseEvent; target: any }, fallbackNodeId: string): string[] => {
+    if (event.evt.shiftKey) {
+      const nextSelection = [...new Set([...selectedIds, fallbackNodeId])];
+      onSelectIds(nextSelection);
+      hitCycleRef.current = null;
+      return nextSelection;
+    }
+
+    const { hitIds, pointer } = resolveHitNodeIds(event);
+    const stack = hitIds.length > 0 ? hitIds : [fallbackNodeId];
+    const previous = hitCycleRef.current;
+    const sameStack =
+      previous &&
+      previous.hitIds.length === stack.length &&
+      previous.hitIds.every((id, index) => id === stack[index]);
+    const samePosition =
+      previous &&
+      pointer &&
+      Math.abs(previous.x - pointer.x) <= 4 &&
+      Math.abs(previous.y - pointer.y) <= 4;
+
+    let nextId = stack[0] ?? fallbackNodeId;
+
+    // Repeated clicks at the same point rotate through overlapping nodes.
+    if (sameStack && samePosition && selectedIds.length === 1) {
+      const currentIndex = stack.indexOf(selectedIds[0]);
+      if (currentIndex >= 0) {
+        nextId = stack[(currentIndex + 1) % stack.length] ?? nextId;
+      }
+    }
+
+    onSelectIds([nextId]);
+    if (pointer) {
+      hitCycleRef.current = { x: pointer.x, y: pointer.y, hitIds: stack };
+    } else {
+      hitCycleRef.current = null;
+    }
+
+    return [nextId];
   };
 
   const beginTextEdit = (node: CanvasNode, isNew = false) => {
@@ -1146,10 +1223,9 @@ export function CanvasStage({
               drawNode(
                 node,
                 canvas.width,
-                selectedIds,
                 activeTool,
                 textEditor?.nodeId ?? null,
-                onSelectIds,
+                resolveNodeSelectionFromClick,
                 beginTextEdit,
                 (id, x, y) => {
                   onCanvasChange({
