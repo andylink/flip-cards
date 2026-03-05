@@ -1,4 +1,5 @@
 import { CanvasNode, CanvasState } from '@/lib/types/domain';
+import { normalizeCanvasState } from '@/lib/utils/canvasAppearance';
 
 export const CANVAS_MIN_WIDTH = 320;
 export const CANVAS_MIN_HEIGHT = 240;
@@ -56,11 +57,11 @@ export function serializeCanvas(canvas: CanvasState): string {
 
 export function deserializeCanvas(raw: string): CanvasState {
   const parsed = JSON.parse(raw) as CanvasState;
-  return {
+  return normalizeCanvasState({
     width: parsed.width,
     height: parsed.height,
     nodes: parsed.nodes ?? []
-  };
+  });
 }
 
 export function nudgeNodes(nodes: CanvasNode[], ids: string[], deltaX: number, deltaY: number): CanvasNode[] {

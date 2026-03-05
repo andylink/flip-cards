@@ -14,7 +14,23 @@ describe('canvas utils', () => {
       height: 100,
       nodes: [{ id: '1', type: 'text', x: 0, y: 0 }]
     };
-    expect(deserializeCanvas(serializeCanvas(canvas))).toEqual(canvas);
+    expect(deserializeCanvas(serializeCanvas(canvas))).toEqual({
+      width: 200,
+      height: 100,
+      nodes: [
+        {
+          id: '1',
+          type: 'text',
+          x: 0,
+          y: 0,
+          fill: {
+            enabled: true,
+            color: '#0f172a',
+            opacity: 1
+          }
+        }
+      ]
+    });
   });
 
   it('clamps canvas size to provided bounds', () => {

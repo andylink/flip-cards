@@ -5,16 +5,27 @@ import { Layer, Line, Rect, Stage, Text, Circle, Image as KonvaImage } from 'rea
 import type { KonvaEventObject } from 'konva/lib/Node';
 import { CanvasNode, CanvasState } from '@/lib/types/domain';
 import { snapToGrid } from '@/lib/utils/canvas';
+import { toKonvaFill, toKonvaStroke } from '@/lib/utils/canvasAppearance';
 
 const GRID = 8;
 
-type CanvasTool = 'select' | 'move' | 'text';
+type CanvasTool = 'select' | 'move' | 'text' | 'rect' | 'circle' | 'line';
 
 type TextDefaults = {
   fontFamily: string;
   fontSize: number;
   fontWeight: string;
   color: string;
+};
+
+type ShapeDefaults = {
+  fillEnabled: boolean;
+  fillColor: string;
+  fillOpacity: number;
+  strokeEnabled: boolean;
+  strokeColor: string;
+  strokeWidth: number;
+  strokeOpacity: number;
 };
 
 type TextEditorState = {
@@ -34,6 +45,7 @@ type Props = {
   selectedIds: string[];
   activeTool: CanvasTool;
   textDefaults: TextDefaults;
+  shapeDefaults: ShapeDefaults;
   onSelectIds: (ids: string[]) => void;
   onCanvasChange: (canvas: CanvasState) => void;
 };
@@ -133,6 +145,7 @@ function drawNode(
   };
 
   if (node.type === 'text') {
+    const fillProps = toKonvaFill(node, '#0f172a');
     return (
       <Text
         key={node.id}
@@ -144,7 +157,7 @@ function drawNode(
         fontFamily={node.fontFamily ?? 'Arial'}
         fontSize={node.fontSize ?? 24}
         fontStyle={node.fontWeight === '700' ? 'bold' : 'normal'}
-        fill={node.fill ?? '#0f172a'}
+        {...fillProps}
         onClick={(event: any) => {
           // prevent bubbling to Stage so edit isn’t interrupted by selection/background handlers
           event.cancelBubble = true;
@@ -165,6 +178,8 @@ function drawNode(
   }
 
   if (node.type === 'rect') {
+    const fillProps = toKonvaFill(node, '#dbeafe');
+    const strokeProps = toKonvaStroke(node, '#334155', 2);
     return (
       <Rect
         key={node.id}
@@ -172,24 +187,27 @@ function drawNode(
         {...common}
         width={node.width ?? 180}
         height={node.height ?? 100}
-        fill={node.fill ?? '#dbeafe'}
+        {...fillProps}
+        {...strokeProps}
       />
     );
   }
 
   if (node.type === 'circle') {
-    return <Circle key={node.id} id={node.id} {...common} radius={node.radius ?? 50} fill={node.fill ?? '#bbf7d0'} />;
+    const fillProps = toKonvaFill(node, '#bbf7d0');
+    const strokeProps = toKonvaStroke(node, '#334155', 2);
+    return <Circle key={node.id} id={node.id} {...common} radius={node.radius ?? 50} {...fillProps} {...strokeProps} />;
   }
 
   if (node.type === 'line') {
+    const strokeProps = toKonvaStroke(node, '#334155', 3);
     return (
       <Line
         key={node.id}
         id={node.id}
         {...common}
         points={node.points ?? [0, 0, 120, 0]}
-        stroke={node.stroke ?? '#334155'}
-        strokeWidth={3}
+        {...strokeProps}
       />
     );
   }
@@ -216,6 +234,7 @@ export function CanvasStage({
   selectedIds,
   activeTool,
   textDefaults,
+  shapeDefaults,
   onSelectIds,
   onCanvasChange
 }: Props) {
@@ -280,8 +299,10 @@ export function CanvasStage({
     const className = typeof event.target.getClassName === 'function' ? event.target.getClassName() : '';
     const isBackgroundTarget = event.target === stage || parent === stage;
     const isTextTarget = className === 'Text';
+    const creationTools: CanvasTool[] = ['text', 'rect', 'circle', 'line'];
+    const isCreationTool = creationTools.includes(activeTool);
 
-    if (!isBackgroundTarget && activeTool !== 'text') return;
+    if (!isBackgroundTarget && !isCreationTool) return;
     if (activeTool === 'text' && isTextTarget) return;
 
     if (textEditor) {
@@ -306,7 +327,11 @@ export function CanvasStage({
         fontFamily: textDefaults.fontFamily,
         fontSize: textDefaults.fontSize,
         fontWeight: textDefaults.fontWeight,
-        fill: textDefaults.color
+        fill: {
+          enabled: true,
+          color: textDefaults.color,
+          opacity: 1
+        }
       };
 
       onCanvasChange({
@@ -315,6 +340,75 @@ export function CanvasStage({
       });
       onSelectIds([textId]);
       beginTextEdit(textNode, true);
+      return;
+    }
+
+    if (activeTool === 'rect' || activeTool === 'circle' || activeTool === 'line') {
+      if (!isBackgroundTarget) return;
+      const pointer = stage.getPointerPosition();
+      if (!pointer) return;
+
+      const baseX = snapToGrid(pointer.x / scale, GRID);
+      const baseY = snapToGrid(pointer.y / scale, GRID);
+      const shapeId =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `${activeTool}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+      const stroke = {
+        enabled: shapeDefaults.strokeEnabled,
+        color: shapeDefaults.strokeColor,
+        width: shapeDefaults.strokeWidth,
+        opacity: shapeDefaults.strokeOpacity
+      };
+
+      const nextNode: CanvasNode =
+        activeTool === 'rect'
+          ? {
+              id: shapeId,
+              type: 'rect',
+              x: baseX,
+              y: baseY,
+              width: 180,
+              height: 100,
+              fill: {
+                enabled: shapeDefaults.fillEnabled,
+                color: shapeDefaults.fillColor,
+                opacity: shapeDefaults.fillOpacity
+              },
+              stroke
+            }
+          : activeTool === 'circle'
+          ? {
+              id: shapeId,
+              type: 'circle',
+              x: baseX,
+              y: baseY,
+              radius: 56,
+              fill: {
+                enabled: shapeDefaults.fillEnabled,
+                color: shapeDefaults.fillColor,
+                opacity: shapeDefaults.fillOpacity
+              },
+              stroke
+            }
+          : {
+              id: shapeId,
+              type: 'line',
+              x: baseX,
+              y: baseY,
+              points: [0, 0, 140, 0],
+              stroke: {
+                ...stroke,
+                enabled: true
+              }
+            };
+
+      onCanvasChange({
+        ...canvas,
+        nodes: [...canvas.nodes, nextNode]
+      });
+      onSelectIds([shapeId]);
       return;
     }
 
@@ -332,7 +426,7 @@ export function CanvasStage({
       fontFamily: node.fontFamily ?? textDefaults.fontFamily,
       fontSize: node.fontSize ?? textDefaults.fontSize,
       fontWeight: node.fontWeight ?? textDefaults.fontWeight,
-      color: node.fill ?? textDefaults.color,
+      color: node.fill?.color ?? textDefaults.color,
       isNew
     });
 
@@ -359,14 +453,18 @@ export function CanvasStage({
     onCanvasChange({
       ...canvas,
       nodes: canvas.nodes.map((node) =>
-        node.id === textEditor.nodeId
+        node.id === textEditor.nodeId && node.type === 'text'
           ? {
               ...node,
               text: textEditor.value,
               fontFamily: textEditor.fontFamily,
               fontSize: textEditor.fontSize,
               fontWeight: textEditor.fontWeight,
-              fill: textEditor.color
+              fill: {
+                enabled: true,
+                color: textEditor.color,
+                opacity: node.fill?.opacity ?? 1
+              }
             }
           : node
       )
@@ -462,7 +560,16 @@ export function CanvasStage({
         <Stage
           width={displayWidth}
           height={displayHeight}
-          style={{ cursor: activeTool === 'text' ? 'text' : activeTool === 'move' ? 'grab' : 'default' }}
+          style={{
+            cursor:
+              activeTool === 'text'
+                ? 'text'
+                : activeTool === 'move'
+                ? 'grab'
+                : activeTool === 'rect' || activeTool === 'circle' || activeTool === 'line'
+                ? 'crosshair'
+                : 'default'
+          }}
           onMouseDown={handleStagePointerDown}
           onTouchStart={handleStagePointerDown}
         >

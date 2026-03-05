@@ -12,6 +12,7 @@ import { Button } from '@/components/Common/Button';
 import { Input } from '@/components/Common/Input';
 import { clozeSchema, dropdownSchema, freeFormSchema, mcqSchema } from '@/lib/utils/answerEvaluation';
 import { CANVAS_MIN_HEIGHT, CANVAS_MIN_WIDTH, clampPortraitCanvasSize } from '@/lib/utils/canvas';
+import { CanvasAppearanceDefaults, getNodeFillColor, normalizeCanvasState } from '@/lib/utils/canvasAppearance';
 
 const CanvasStage = dynamic(
   () => import('@/components/CanvasStage').then((module) => module.CanvasStage),
@@ -28,7 +29,7 @@ type Props = {
   >;
 };
 
-type CanvasTool = 'select' | 'move' | 'text';
+type CanvasTool = 'select' | 'move' | 'text' | 'rect' | 'circle' | 'line';
 
 const MOBILE_SAFE_CANVAS_MAX_WIDTH = 720;
 const MOBILE_SAFE_CANVAS_MAX_HEIGHT = 1200;
@@ -63,6 +64,17 @@ const FONT_OPTIONS = [
 
 const FONT_SIZE_OPTIONS = [16, 20, 24, 28, 32, 40, 48, 56];
 const COLOR_SWATCHES = ['#000000', '#1d4ed8', '#059669', '#ea580c', '#be123c', '#7c3aed', '#334155', '#ffffff'];
+const STROKE_WIDTH_OPTIONS = [0, 1, 2, 3, 4, 6, 8, 12];
+
+type ShapeSettings = {
+  fillEnabled: boolean;
+  fillColor: string;
+  fillOpacity: number;
+  strokeEnabled: boolean;
+  strokeColor: string;
+  strokeWidth: number;
+  strokeOpacity: number;
+};
 
 type NodeBounds = {
   x: number;
@@ -302,7 +314,21 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [activeTool, setActiveTool] = useState<CanvasTool>('select');
   const [canvasBounds, setCanvasBounds] = useState({ maxWidth: DEFAULT_CANVAS_MAX_WIDTH, maxHeight: DEFAULT_CANVAS_MAX_HEIGHT });
-  const [textSettings, setTextSettings] = useState({ fontFamily: 'Arial', fontSize: 32, fontWeight: '400', color: '#000000' });
+  const [textSettings, setTextSettings] = useState({
+    fontFamily: 'Arial',
+    fontSize: 32,
+    fontWeight: '400',
+    color: CanvasAppearanceDefaults.textFill.color
+  });
+  const [shapeSettings, setShapeSettings] = useState<ShapeSettings>({
+    fillEnabled: CanvasAppearanceDefaults.shapeFill.enabled,
+    fillColor: CanvasAppearanceDefaults.shapeFill.color,
+    fillOpacity: CanvasAppearanceDefaults.shapeFill.opacity,
+    strokeEnabled: CanvasAppearanceDefaults.shapeStroke.enabled,
+    strokeColor: CanvasAppearanceDefaults.shapeStroke.color,
+    strokeWidth: CanvasAppearanceDefaults.shapeStroke.width,
+    strokeOpacity: CanvasAppearanceDefaults.shapeStroke.opacity
+  });
   const [answerType, setAnswerType] = useState<AnswerType>('freeform');
   const [answerDraft, setAnswerDraft] = useState<AnswerDraft>(createDefaultDraft());
   const [answerLastModifiedAt, setAnswerLastModifiedAt] = useState<number | null>(null);
@@ -363,9 +389,11 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
       height: currentCard.canvas_json.height
     });
 
+    const normalizedCanvas = normalizeCanvasState(currentCard.canvas_json);
+
     setCanvas(
       {
-        ...currentCard.canvas_json,
+        ...normalizedCanvas,
         width: normalized.width,
         height: normalized.height
       },
@@ -465,7 +493,9 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     }
   };
 
-  const updateSelectedTextNodes = (updates: Partial<Pick<(typeof canvas.nodes)[number], 'fontFamily' | 'fontSize' | 'fontWeight' | 'fill'>>) => {
+  const updateSelectedTextNodes = (
+    updates: Partial<Pick<Extract<CanvasNode, { type: 'text' }>, 'fontFamily' | 'fontSize' | 'fontWeight' | 'fill'>>
+  ) => {
     const selected = new Set(selectedIds);
     if (selected.size === 0) return;
 
@@ -481,7 +511,10 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     }
   };
 
-  const applyColorToSelectedNodes = (color: string) => {
+  const applyAppearanceToSelectedNodes = (updates: {
+    fill?: Partial<{ enabled: boolean; color: string; opacity: number }>;
+    stroke?: Partial<{ enabled: boolean; color: string; width: number; opacity: number }>;
+  }) => {
     const selected = new Set(selectedIds);
     if (selected.size === 0) return;
 
@@ -489,19 +522,58 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     const nextNodes = canvas.nodes.map((node) => {
       if (!selected.has(node.id) || node.locked) return node;
 
-      if (node.type === 'line') {
-        if (node.stroke === color) return node;
+      if (node.type === 'text') {
+        if (!updates.fill) return node;
         hasChanges = true;
-        return { ...node, stroke: color };
+        return {
+          ...node,
+          fill: {
+            enabled: updates.fill.enabled ?? node.fill?.enabled ?? true,
+            color: updates.fill.color ?? node.fill?.color ?? textSettings.color,
+            opacity: updates.fill.opacity ?? node.fill?.opacity ?? 1
+          }
+        };
       }
 
-      if (node.type === 'image') {
-        return node;
+      if (node.type === 'rect' || node.type === 'circle') {
+        hasChanges = true;
+        return {
+          ...node,
+          fill: updates.fill
+            ? {
+                enabled: updates.fill.enabled ?? node.fill?.enabled ?? shapeSettings.fillEnabled,
+                color: updates.fill.color ?? node.fill?.color ?? shapeSettings.fillColor,
+                opacity: updates.fill.opacity ?? node.fill?.opacity ?? shapeSettings.fillOpacity
+              }
+            : node.fill,
+          stroke: updates.stroke
+            ? {
+                enabled: updates.stroke.enabled ?? node.stroke?.enabled ?? shapeSettings.strokeEnabled,
+                color: updates.stroke.color ?? node.stroke?.color ?? shapeSettings.strokeColor,
+                width: updates.stroke.width ?? node.stroke?.width ?? shapeSettings.strokeWidth,
+                opacity: updates.stroke.opacity ?? node.stroke?.opacity ?? shapeSettings.strokeOpacity,
+                dash: node.stroke?.dash
+              }
+            : node.stroke
+        };
       }
 
-      if (node.fill === color) return node;
-      hasChanges = true;
-      return { ...node, fill: color };
+      if (node.type === 'line') {
+        if (!updates.stroke) return node;
+        hasChanges = true;
+        return {
+          ...node,
+          stroke: {
+            enabled: updates.stroke.enabled ?? node.stroke?.enabled ?? true,
+            color: updates.stroke.color ?? node.stroke?.color ?? shapeSettings.strokeColor,
+            width: updates.stroke.width ?? node.stroke?.width ?? 3,
+            opacity: updates.stroke.opacity ?? node.stroke?.opacity ?? 1,
+            dash: node.stroke?.dash
+          }
+        };
+      }
+
+      return node;
     });
 
     if (hasChanges) {
@@ -509,10 +581,49 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     }
   };
 
-  const handleColorChange = (color: string) => {
+  const handleFillColorChange = (color: string) => {
     setTextSettings((previous) => ({ ...previous, color }));
-    applyColorToSelectedNodes(color);
+    setShapeSettings((previous) => ({ ...previous, fillColor: color }));
+    applyAppearanceToSelectedNodes({ fill: { color } });
   };
+
+  const handleStrokeColorChange = (color: string) => {
+    setShapeSettings((previous) => ({ ...previous, strokeColor: color }));
+    applyAppearanceToSelectedNodes({ stroke: { color } });
+  };
+
+  const handleFillEnabledChange = (enabled: boolean) => {
+    setShapeSettings((previous) => ({ ...previous, fillEnabled: enabled }));
+    applyAppearanceToSelectedNodes({ fill: { enabled } });
+  };
+
+  const handleStrokeEnabledChange = (enabled: boolean) => {
+    setShapeSettings((previous) => ({ ...previous, strokeEnabled: enabled }));
+    applyAppearanceToSelectedNodes({ stroke: { enabled } });
+  };
+
+  const handleFillOpacityChange = (value: number) => {
+    const opacity = Math.max(0, Math.min(1, value));
+    setShapeSettings((previous) => ({ ...previous, fillOpacity: opacity }));
+    applyAppearanceToSelectedNodes({ fill: { opacity } });
+  };
+
+  const handleStrokeOpacityChange = (value: number) => {
+    const opacity = Math.max(0, Math.min(1, value));
+    setShapeSettings((previous) => ({ ...previous, strokeOpacity: opacity }));
+    applyAppearanceToSelectedNodes({ stroke: { opacity } });
+  };
+
+  const handleStrokeWidthChange = (value: number) => {
+    const width = Math.max(0, value);
+    setShapeSettings((previous) => ({ ...previous, strokeWidth: width }));
+    applyAppearanceToSelectedNodes({ stroke: { width } });
+  };
+
+  const selectedPrimaryNode = canvas.nodes.find((node) => selectedIds.includes(node.id));
+  const selectedPrimaryFillColor = selectedPrimaryNode
+    ? getNodeFillColor(selectedPrimaryNode, textSettings.color)
+    : textSettings.color;
 
   const alignSelectedToCanvas = (alignment: CanvasAlignment) => {
     const selected = new Set(selectedIds);
@@ -615,6 +726,30 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
                 Text
               </span>
             </Button>
+            <Button
+              variant={activeTool === 'rect' ? 'primary' : 'secondary'}
+              onClick={() => setActiveTool('rect')}
+              aria-label="Rectangle tool"
+              className="w-full"
+            >
+              Rectangle
+            </Button>
+            <Button
+              variant={activeTool === 'circle' ? 'primary' : 'secondary'}
+              onClick={() => setActiveTool('circle')}
+              aria-label="Circle tool"
+              className="w-full"
+            >
+              Circle
+            </Button>
+            <Button
+              variant={activeTool === 'line' ? 'primary' : 'secondary'}
+              onClick={() => setActiveTool('line')}
+              aria-label="Line tool"
+              className="w-full"
+            >
+              Line
+            </Button>
             {activeTool === 'text' ? (
               <div className="space-y-2 rounded-md border border-slate-200 p-2 dark:border-slate-700">
                 <Select
@@ -650,30 +785,89 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
               </div>
             ) : null}
             <div className="space-y-2 rounded-md border border-slate-200 p-2 dark:border-slate-700">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Color</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Appearance</p>
               <div className="flex items-center gap-2">
                 <Input
                   type="color"
-                  value={textSettings.color}
-                  onChange={(event) => handleColorChange(event.target.value)}
-                  aria-label="Element color"
+                  value={selectedPrimaryFillColor}
+                  onChange={(event) => handleFillColorChange(event.target.value)}
+                  aria-label="Fill color"
                   className="h-10 w-16 cursor-pointer p-1"
                 />
-                <span className="text-xs text-slate-500">Default for new elements and selected items.</span>
+                <span className="text-xs text-slate-500">Fill color for selected nodes and new text/shapes.</span>
               </div>
               <div className="grid grid-cols-4 gap-2">
                 {COLOR_SWATCHES.map((color) => (
                   <button
                     key={color}
                     type="button"
-                    aria-label={`Select color ${color}`}
+                    aria-label={`Select fill color ${color}`}
                     title={color}
-                    onClick={() => handleColorChange(color)}
+                    onClick={() => handleFillColorChange(color)}
                     className="h-7 w-full rounded border border-slate-300 transition hover:scale-[1.03] dark:border-slate-600"
                     style={{ backgroundColor: color }}
                   />
                 ))}
               </div>
+              <label className="flex items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-300">
+                Fill enabled
+                <input
+                  type="checkbox"
+                  checked={shapeSettings.fillEnabled}
+                  onChange={(event) => handleFillEnabledChange(event.target.checked)}
+                />
+              </label>
+              <label className="space-y-1 text-xs text-slate-600 dark:text-slate-300">
+                <span>Fill opacity ({Math.round(shapeSettings.fillOpacity * 100)}%)</span>
+                <Input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={Math.round(shapeSettings.fillOpacity * 100)}
+                  onChange={(event) => handleFillOpacityChange(parseNumber(event.target.value, 100) / 100)}
+                />
+              </label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="color"
+                  value={shapeSettings.strokeColor}
+                  onChange={(event) => handleStrokeColorChange(event.target.value)}
+                  aria-label="Stroke color"
+                  className="h-10 w-16 cursor-pointer p-1"
+                />
+                <span className="text-xs text-slate-500">Stroke color for selected shape nodes.</span>
+              </div>
+              <label className="flex items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-300">
+                Stroke enabled
+                <input
+                  type="checkbox"
+                  checked={shapeSettings.strokeEnabled}
+                  onChange={(event) => handleStrokeEnabledChange(event.target.checked)}
+                />
+              </label>
+              <label className="space-y-1 text-xs text-slate-600 dark:text-slate-300">
+                <span>Stroke width</span>
+                <Select
+                  value={String(shapeSettings.strokeWidth)}
+                  onChange={(event) => handleStrokeWidthChange(parseNumber(event.target.value, shapeSettings.strokeWidth))}
+                >
+                  {STROKE_WIDTH_OPTIONS.map((size) => (
+                    <option key={size} value={size}>
+                      {size}px
+                    </option>
+                  ))}
+                </Select>
+              </label>
+              <label className="space-y-1 text-xs text-slate-600 dark:text-slate-300">
+                <span>Stroke opacity ({Math.round(shapeSettings.strokeOpacity * 100)}%)</span>
+                <Input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={Math.round(shapeSettings.strokeOpacity * 100)}
+                  onChange={(event) => handleStrokeOpacityChange(parseNumber(event.target.value, 100) / 100)}
+                />
+              </label>
             </div>
             {activeTool === 'select' ? (
               <div className="space-y-2">
@@ -761,6 +955,7 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
             selectedIds={selectedIds}
             activeTool={activeTool}
             textDefaults={textSettings}
+            shapeDefaults={shapeSettings}
             onSelectIds={setSelectedIds}
             onCanvasChange={(nextCanvas) => setCanvas(nextCanvas)}
           />

@@ -48,6 +48,15 @@ describe('CanvasStage', () => {
         selectedIds={['1']}
         activeTool="select"
         textDefaults={{ fontFamily: 'Arial', fontSize: 24, fontWeight: '400', color: '#0f172a' }}
+        shapeDefaults={{
+          fillEnabled: true,
+          fillColor: '#dbeafe',
+          fillOpacity: 1,
+          strokeEnabled: false,
+          strokeColor: '#334155',
+          strokeWidth: 2,
+          strokeOpacity: 1
+        }}
         onSelectIds={vi.fn()}
         onCanvasChange={onCanvasChange}
       />
@@ -72,6 +81,15 @@ describe('CanvasStage', () => {
         selectedIds={[]}
         activeTool="text"
         textDefaults={{ fontFamily: 'Arial', fontSize: 24, fontWeight: '400', color: '#0f172a' }}
+        shapeDefaults={{
+          fillEnabled: true,
+          fillColor: '#dbeafe',
+          fillOpacity: 1,
+          strokeEnabled: false,
+          strokeColor: '#334155',
+          strokeWidth: 2,
+          strokeOpacity: 1
+        }}
         onSelectIds={onSelectIds}
         onCanvasChange={onCanvasChange}
       />
@@ -111,6 +129,15 @@ describe('CanvasStage', () => {
         selectedIds={['1']}
         activeTool="select"
         textDefaults={{ fontFamily: 'Arial', fontSize: 24, fontWeight: '400', color: '#0f172a' }}
+        shapeDefaults={{
+          fillEnabled: true,
+          fillColor: '#dbeafe',
+          fillOpacity: 1,
+          strokeEnabled: false,
+          strokeColor: '#334155',
+          strokeWidth: 2,
+          strokeOpacity: 1
+        }}
         onSelectIds={onSelectIds}
         onCanvasChange={onCanvasChange}
       />
