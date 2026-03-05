@@ -10,9 +10,10 @@ type Props = {
   onAdd: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
+  canDelete: boolean;
 };
 
-export function CardNavigator({ index, total, onPrevious, onNext, onAdd, onDuplicate, onDelete }: Props) {
+export function CardNavigator({ index, total, onPrevious, onNext, onAdd, onDuplicate, onDelete, canDelete }: Props) {
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-md border border-slate-200 p-2 dark:border-slate-700">
       <span className="mr-2 text-sm">
@@ -28,7 +29,7 @@ export function CardNavigator({ index, total, onPrevious, onNext, onAdd, onDupli
       <Button onClick={onDuplicate} variant="secondary">
         Duplicate
       </Button>
-      <Button onClick={onDelete} variant="danger">
+      <Button onClick={onDelete} variant="danger" disabled={!canDelete}>
         Delete
       </Button>
     </div>

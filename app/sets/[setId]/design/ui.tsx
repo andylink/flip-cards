@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabase/client';
-import { AnswerType, CanvasState, CardRecord } from '@/lib/types/domain';
+import { AnswerType, CanvasNode, CanvasState, CardRecord } from '@/lib/types/domain';
 import { useEditorStore } from '@/lib/store/editorStore';
 import { CardNavigator } from '@/components/CardNavigator';
 import { ClozeEditor, DropdownEditor, FreeFormEditor, MCQEditor } from '@/components/AnswerBuilder';
 import { Select } from '@/components/Common/Select';
 import { Button } from '@/components/Common/Button';
+import { Input } from '@/components/Common/Input';
 import { clozeSchema, dropdownSchema, freeFormSchema, mcqSchema } from '@/lib/utils/answerEvaluation';
 import { CANVAS_MIN_HEIGHT, CANVAS_MIN_WIDTH, clampPortraitCanvasSize } from '@/lib/utils/canvas';
 
@@ -48,6 +49,11 @@ const createCanvas = (width: number, height: number): CanvasState => ({
 const DEFAULT_CANVAS_MAX_WIDTH = 1600;
 const DEFAULT_CANVAS_MAX_HEIGHT = 1000;
 
+const parseNumber = (value: string, fallback: number): number => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
 const FONT_OPTIONS = [
   { value: 'Arial', label: 'Arial' },
   { value: 'Georgia', label: 'Georgia' },
@@ -56,6 +62,83 @@ const FONT_OPTIONS = [
 ];
 
 const FONT_SIZE_OPTIONS = [16, 20, 24, 28, 32, 40, 48, 56];
+const COLOR_SWATCHES = ['#000000', '#1d4ed8', '#059669', '#ea580c', '#be123c', '#7c3aed', '#334155', '#ffffff'];
+
+type NodeBounds = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type CanvasAlignment =
+  | 'left'
+  | 'h-center'
+  | 'right'
+  | 'top'
+  | 'v-center'
+  | 'bottom';
+
+const getNodeBounds = (node: CanvasNode): NodeBounds | null => {
+  if (node.hidden) return null;
+
+  if (node.type === 'rect' || node.type === 'image' || node.type === 'group') {
+    return {
+      x: node.x,
+      y: node.y,
+      width: node.width ?? 180,
+      height: node.height ?? 100
+    };
+  }
+
+  if (node.type === 'circle') {
+    const radius = node.radius ?? 50;
+    return {
+      x: node.x - radius,
+      y: node.y - radius,
+      width: radius * 2,
+      height: radius * 2
+    };
+  }
+
+  if (node.type === 'line') {
+    const points = node.points ?? [0, 0, 120, 0];
+    const pointXs: number[] = [];
+    const pointYs: number[] = [];
+
+    for (let index = 0; index < points.length - 1; index += 2) {
+      pointXs.push(points[index]);
+      pointYs.push(points[index + 1]);
+    }
+
+    const minX = Math.min(...pointXs);
+    const minY = Math.min(...pointYs);
+    const maxX = Math.max(...pointXs);
+    const maxY = Math.max(...pointYs);
+    const padding = 3;
+
+    return {
+      x: node.x + minX - padding,
+      y: node.y + minY - padding,
+      width: Math.max(1, maxX - minX + padding * 2),
+      height: Math.max(1, maxY - minY + padding * 2)
+    };
+  }
+
+  if (node.type === 'text') {
+    const fontSize = node.fontSize ?? 24;
+    const lines = (node.text ?? '').split('\n');
+    const maxLineLength = lines.reduce((largest, line) => Math.max(largest, line.length), 0);
+    return {
+      x: node.x,
+      y: node.y,
+      width: Math.max(fontSize * 0.8, maxLineLength * fontSize * 0.6),
+      height: Math.max(fontSize * 1.2, lines.length * fontSize * 1.2)
+    };
+  }
+
+  return null;
+};
 
 type FreeformEditorState = {
   accepted: string;
@@ -219,7 +302,7 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [activeTool, setActiveTool] = useState<CanvasTool>('select');
   const [canvasBounds, setCanvasBounds] = useState({ maxWidth: DEFAULT_CANVAS_MAX_WIDTH, maxHeight: DEFAULT_CANVAS_MAX_HEIGHT });
-  const [textSettings, setTextSettings] = useState({ fontFamily: 'Arial', fontSize: 32, fontWeight: '400', color: '#0f172a' });
+  const [textSettings, setTextSettings] = useState({ fontFamily: 'Arial', fontSize: 32, fontWeight: '400', color: '#000000' });
   const [answerType, setAnswerType] = useState<AnswerType>('freeform');
   const [answerDraft, setAnswerDraft] = useState<AnswerDraft>(createDefaultDraft());
   const [answerLastModifiedAt, setAnswerLastModifiedAt] = useState<number | null>(null);
@@ -398,6 +481,81 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     }
   };
 
+  const applyColorToSelectedNodes = (color: string) => {
+    const selected = new Set(selectedIds);
+    if (selected.size === 0) return;
+
+    let hasChanges = false;
+    const nextNodes = canvas.nodes.map((node) => {
+      if (!selected.has(node.id) || node.locked) return node;
+
+      if (node.type === 'line') {
+        if (node.stroke === color) return node;
+        hasChanges = true;
+        return { ...node, stroke: color };
+      }
+
+      if (node.type === 'image') {
+        return node;
+      }
+
+      if (node.fill === color) return node;
+      hasChanges = true;
+      return { ...node, fill: color };
+    });
+
+    if (hasChanges) {
+      setCanvas({ ...canvas, nodes: nextNodes });
+    }
+  };
+
+  const handleColorChange = (color: string) => {
+    setTextSettings((previous) => ({ ...previous, color }));
+    applyColorToSelectedNodes(color);
+  };
+
+  const alignSelectedToCanvas = (alignment: CanvasAlignment) => {
+    const selected = new Set(selectedIds);
+    if (selected.size === 0) return;
+
+    let hasChanges = false;
+    const nextNodes = canvas.nodes.map((node) => {
+      if (!selected.has(node.id) || node.locked) return node;
+
+      const bounds = getNodeBounds(node);
+      if (!bounds) return node;
+
+      let deltaX = 0;
+      let deltaY = 0;
+
+      if (alignment === 'left') {
+        deltaX = -bounds.x;
+      } else if (alignment === 'h-center') {
+        deltaX = canvas.width / 2 - (bounds.x + bounds.width / 2);
+      } else if (alignment === 'right') {
+        deltaX = canvas.width - (bounds.x + bounds.width);
+      } else if (alignment === 'top') {
+        deltaY = -bounds.y;
+      } else if (alignment === 'v-center') {
+        deltaY = canvas.height / 2 - (bounds.y + bounds.height / 2);
+      } else if (alignment === 'bottom') {
+        deltaY = canvas.height - (bounds.y + bounds.height);
+      }
+
+      if (deltaX === 0 && deltaY === 0) return node;
+      hasChanges = true;
+      return {
+        ...node,
+        x: node.x + deltaX,
+        y: node.y + deltaY
+      };
+    });
+
+    if (hasChanges) {
+      setCanvas({ ...canvas, nodes: nextNodes });
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -412,13 +570,27 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
         onAdd={addCard}
         onDuplicate={duplicateSelection}
         onDelete={deleteSelection}
+        canDelete={selectedIds.length > 0}
       />
       <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)_420px]">
         <aside className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="space-y-3">
             <Button
+              variant={activeTool === 'select' ? 'primary' : 'secondary'}
+              onClick={() => setActiveTool('select')}
+              aria-label="Select tool"
+              className="w-full"
+            >
+              <span className="flex items-center justify-center gap-2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M4 3l14 9-6 1 3 7-3 1-3-7-5 4V3z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Select
+              </span>
+            </Button>
+            <Button
               variant={activeTool === 'move' ? 'primary' : 'secondary'}
-              onClick={() => setActiveTool((current) => (current === 'move' ? 'select' : 'move'))}
+              onClick={() => setActiveTool('move')}
               aria-label="Move tool"
               className="w-full"
             >
@@ -432,7 +604,7 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
             </Button>
             <Button
               variant={activeTool === 'text' ? 'primary' : 'secondary'}
-              onClick={() => setActiveTool((current) => (current === 'text' ? 'select' : 'text'))}
+              onClick={() => setActiveTool('text')}
               aria-label="Text tool"
               className="w-full"
             >
@@ -475,6 +647,107 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
                     </option>
                   ))}
                 </Select>
+              </div>
+            ) : null}
+            <div className="space-y-2 rounded-md border border-slate-200 p-2 dark:border-slate-700">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Color</p>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="color"
+                  value={textSettings.color}
+                  onChange={(event) => handleColorChange(event.target.value)}
+                  aria-label="Element color"
+                  className="h-10 w-16 cursor-pointer p-1"
+                />
+                <span className="text-xs text-slate-500">Default for new elements and selected items.</span>
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                {COLOR_SWATCHES.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    aria-label={`Select color ${color}`}
+                    title={color}
+                    onClick={() => handleColorChange(color)}
+                    className="h-7 w-full rounded border border-slate-300 transition hover:scale-[1.03] dark:border-slate-600"
+                    style={{ backgroundColor: color }}
+                  />
+                ))}
+              </div>
+            </div>
+            {activeTool === 'select' ? (
+              <div className="space-y-2">
+                <div className="grid grid-cols-3 gap-2 rounded-md border border-slate-200 p-2 dark:border-slate-700">
+                  <Button
+                    variant="secondary"
+                    className="w-full"
+                    onClick={() => alignSelectedToCanvas('left')}
+                    disabled={selectedIds.length === 0}
+                    aria-label="Align left to canvas"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M4 4v16M8 8h12M8 12h9M8 16h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    className="w-full"
+                    onClick={() => alignSelectedToCanvas('h-center')}
+                    disabled={selectedIds.length === 0}
+                    aria-label="Align horizontal center to canvas"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M12 4v16M4 8h7M13 8h7M6 12h12M4 16h7M13 16h7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    className="w-full"
+                    onClick={() => alignSelectedToCanvas('right')}
+                    disabled={selectedIds.length === 0}
+                    aria-label="Align right to canvas"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M20 4v16M4 8h12M7 12h9M4 16h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    className="w-full"
+                    onClick={() => alignSelectedToCanvas('top')}
+                    disabled={selectedIds.length === 0}
+                    aria-label="Align top to canvas"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M4 4h16M8 8v12M12 8v9M16 8v12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    className="w-full"
+                    onClick={() => alignSelectedToCanvas('v-center')}
+                    disabled={selectedIds.length === 0}
+                    aria-label="Align vertical center to canvas"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M4 12h16M8 4v7M8 13v7M12 6v12M16 4v7M16 13v7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    className="w-full"
+                    onClick={() => alignSelectedToCanvas('bottom')}
+                    disabled={selectedIds.length === 0}
+                    aria-label="Align bottom to canvas"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M4 20h16M8 4v12M12 7v9M16 4v12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </Button>
+                </div>
+                <Button variant="danger" className="w-full" onClick={deleteSelection} disabled={selectedIds.length === 0}>
+                  Delete Selected
+                </Button>
               </div>
             ) : null}
           </div>

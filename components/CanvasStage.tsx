@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Layer, Line, Rect, Stage, Text, Circle, Image as KonvaImage } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import { CanvasNode, CanvasState } from '@/lib/types/domain';
@@ -37,6 +37,74 @@ type Props = {
   onSelectIds: (ids: string[]) => void;
   onCanvasChange: (canvas: CanvasState) => void;
 };
+
+type NodeBounds = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+function getNodeBounds(node: CanvasNode): NodeBounds | null {
+  if (node.hidden) return null;
+
+  if (node.type === 'rect' || node.type === 'image' || node.type === 'group') {
+    return {
+      x: node.x,
+      y: node.y,
+      width: node.width ?? 180,
+      height: node.height ?? 100
+    };
+  }
+
+  if (node.type === 'circle') {
+    const radius = node.radius ?? 50;
+    return {
+      x: node.x - radius,
+      y: node.y - radius,
+      width: radius * 2,
+      height: radius * 2
+    };
+  }
+
+  if (node.type === 'line') {
+    const points = node.points ?? [0, 0, 120, 0];
+    const pointXs: number[] = [];
+    const pointYs: number[] = [];
+
+    for (let index = 0; index < points.length - 1; index += 2) {
+      pointXs.push(points[index]);
+      pointYs.push(points[index + 1]);
+    }
+
+    const minX = Math.min(...pointXs);
+    const minY = Math.min(...pointYs);
+    const maxX = Math.max(...pointXs);
+    const maxY = Math.max(...pointYs);
+    const padding = 3;
+
+    return {
+      x: node.x + minX - padding,
+      y: node.y + minY - padding,
+      width: Math.max(1, maxX - minX + padding * 2),
+      height: Math.max(1, maxY - minY + padding * 2)
+    };
+  }
+
+  if (node.type === 'text') {
+    const fontSize = node.fontSize ?? 24;
+    const lines = (node.text ?? '').split('\n');
+    const maxLineLength = lines.reduce((largest, line) => Math.max(largest, line.length), 0);
+    return {
+      x: node.x,
+      y: node.y,
+      width: Math.max(fontSize * 0.8, maxLineLength * fontSize * 0.6),
+      height: Math.max(fontSize * 1.2, lines.length * fontSize * 1.2)
+    };
+  }
+
+  return null;
+}
 
 function drawNode(
   node: CanvasNode,
@@ -322,7 +390,29 @@ export function CanvasStage({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (textEditor) return;
+      const target = event.target as HTMLElement | null;
+      const targetTag = target?.tagName;
+      const isTypingTarget =
+        targetTag === 'INPUT' ||
+        targetTag === 'TEXTAREA' ||
+        targetTag === 'SELECT' ||
+        Boolean(target?.isContentEditable);
+
+      if (isTypingTarget) return;
+
+      if ((event.key === 'Delete' || event.key === 'Backspace') && activeTool === 'select') {
+        if (selectedIds.length === 0) return;
+        event.preventDefault();
+        const selected = new Set(selectedIds);
+        onCanvasChange({
+          ...canvas,
+          nodes: canvas.nodes.filter((node) => !selected.has(node.id))
+        });
+        onSelectIds([]);
+        return;
+      }
+
+      if (textEditor || selectedIds.length === 0) return;
 
       const step = event.shiftKey ? 10 : 1;
       if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
@@ -352,7 +442,18 @@ export function CanvasStage({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [canvas, selectedIds, onCanvasChange, textEditor]);
+  }, [activeTool, canvas, onCanvasChange, onSelectIds, selectedIds, textEditor]);
+
+  const selectionBounds = useMemo(
+    () =>
+      activeTool === 'select'
+        ? canvas.nodes
+            .filter((node) => selectedIds.includes(node.id) && node.id !== textEditor?.nodeId)
+            .map((node) => ({ id: node.id, bounds: getNodeBounds(node) }))
+            .filter((entry): entry is { id: string; bounds: NodeBounds } => Boolean(entry.bounds))
+        : [],
+    [activeTool, canvas.nodes, selectedIds, textEditor?.nodeId]
+  );
 
   return (
     <div className="space-y-3">
@@ -384,6 +485,20 @@ export function CanvasStage({
                 }
               )
             )}
+            {selectionBounds.map(({ id, bounds }) => (
+              <Rect
+                key={`selection-${id}`}
+                x={bounds.x}
+                y={bounds.y}
+                width={bounds.width}
+                height={bounds.height}
+                fillEnabled={false}
+                stroke="#2563eb"
+                strokeWidth={1.5}
+                dash={[6, 4]}
+                listening={false}
+              />
+            ))}
           </Layer>
         </Stage>
           {textEditor ? (
