@@ -9,7 +9,9 @@ import { toKonvaFill, toKonvaStroke } from '@/lib/utils/canvasAppearance';
 
 const GRID = 8;
 
-type CanvasTool = 'select' | 'move' | 'text' | 'rect' | 'circle' | 'line';
+type CanvasTool = 'select' | 'move' | 'text' | 'rect' | 'circle' | 'line' | 'icon';
+
+type ImageNode = Extract<CanvasNode, { type: 'image' }>;
 
 type TextDefaults = {
   fontFamily: string;
@@ -129,6 +131,61 @@ function getNodeBounds(node: CanvasNode, canvasWidth: number): NodeBounds | null
   }
 
   return null;
+}
+
+function CanvasImageNode({
+  node,
+  common,
+  onResize
+}: {
+  node: ImageNode;
+  common: {
+    x: number;
+    y: number;
+    draggable: boolean;
+    onClick: (event: { evt: MouseEvent }) => void;
+    onDragEnd: (event: { target: { x: () => number; y: () => number } }) => void;
+  };
+  onResize: (nodeId: string, nextNode: CanvasNode) => void;
+}) {
+  const [imageElement, setImageElement] = useState<HTMLImageElement | null>(null);
+
+  useEffect(() => {
+    if (!node.src) {
+      setImageElement(null);
+      return;
+    }
+
+    const image = new window.Image();
+    image.onload = () => setImageElement(image);
+    image.onerror = () => setImageElement(null);
+    image.src = node.src;
+  }, [node.src]);
+
+  return (
+    <KonvaImage
+      key={node.id}
+      id={node.id}
+      {...common}
+      image={imageElement ?? undefined}
+      width={node.width ?? 200}
+      height={node.height ?? 120}
+      onTransformEnd={(event: any) => {
+        const target = event.target;
+        const nextWidth = Math.max(8, Math.round((node.width ?? 200) * target.scaleX()));
+        const nextHeight = Math.max(8, Math.round((node.height ?? 120) * target.scaleY()));
+        target.scaleX(1);
+        target.scaleY(1);
+        onResize(node.id, {
+          ...node,
+          x: snapToGrid(target.x(), GRID),
+          y: snapToGrid(target.y(), GRID),
+          width: snapToGrid(nextWidth, GRID),
+          height: snapToGrid(nextHeight, GRID)
+        });
+      }}
+    />
+  );
 }
 
 function drawNode(
@@ -286,17 +343,7 @@ function drawNode(
   }
 
   if (node.type === 'image') {
-    return (
-      <KonvaImage
-        key={node.id}
-        id={node.id}
-        {...common}
-        image={undefined}
-        width={node.width ?? 200}
-        height={node.height ?? 120}
-        // TODO: Resolve image assets through signed URL + useImage hook.
-      />
-    );
+    return <CanvasImageNode key={node.id} node={node} common={common} onResize={onResize} />;
   }
 
   return null;
@@ -661,7 +708,14 @@ export function CanvasStage({
     if (activeTool !== 'select' || selectedIds.length !== 1) return null;
     const selectedNode = canvas.nodes.find((node) => node.id === selectedIds[0]);
     if (!selectedNode) return null;
-    if (selectedNode.type !== 'rect' && selectedNode.type !== 'circle' && selectedNode.type !== 'line') return null;
+    if (
+      selectedNode.type !== 'rect' &&
+      selectedNode.type !== 'circle' &&
+      selectedNode.type !== 'line' &&
+      selectedNode.type !== 'image'
+    ) {
+      return null;
+    }
     return selectedNode;
   }, [activeTool, canvas.nodes, selectedIds]);
 
@@ -712,6 +766,8 @@ export function CanvasStage({
                 ? 'grab'
                 : activeTool === 'rect' || activeTool === 'circle' || activeTool === 'line'
                 ? 'crosshair'
+                    : activeTool === 'icon'
+                    ? 'copy'
                 : 'default'
           }}
           onMouseDown={handleStagePointerDown}
@@ -757,7 +813,7 @@ export function CanvasStage({
               <Transformer
                 ref={transformerRef}
                 rotateEnabled={false}
-                keepRatio={selectedShapeNode.type === 'circle' || shiftPressed}
+                keepRatio={selectedShapeNode.type === 'circle' || selectedShapeNode.type === 'image' || shiftPressed}
                 flipEnabled={false}
                 boundBoxFunc={(oldBox: any, newBox: any) => {
                   const minSize = 8;

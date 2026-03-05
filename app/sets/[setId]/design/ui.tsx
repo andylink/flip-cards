@@ -1,7 +1,47 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { type ComponentType, useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
+import {
+  AlarmClock,
+  BookOpen,
+  Brain,
+  Briefcase,
+  Calculator,
+  Calendar,
+  Camera,
+  CheckCircle2,
+  ClipboardList,
+  Cloud,
+  Code2,
+  Compass,
+  Dumbbell,
+  FileText,
+  FlaskConical,
+  Globe,
+  GraduationCap,
+  Heart,
+  HelpCircle,
+  Home,
+  Landmark,
+  Leaf,
+  Lightbulb,
+  Link2,
+  Map as MapIcon,
+  Music2,
+  Palette,
+  PenSquare,
+  Rocket,
+  Shield,
+  ShoppingCart,
+  Smile,
+  Sparkles,
+  Star,
+  Target,
+  Trophy,
+  Users,
+  Wrench
+} from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { AnswerType, CanvasNode, CanvasState, CardRecord } from '@/lib/types/domain';
 import { useEditorStore } from '@/lib/store/editorStore';
@@ -31,7 +71,17 @@ type Props = {
   >;
 };
 
-type CanvasTool = 'select' | 'move' | 'text' | 'rect' | 'circle' | 'line';
+type CanvasTool = 'select' | 'move' | 'text' | 'rect' | 'circle' | 'line' | 'icon';
+
+type LucideIconWithNode = ComponentType<any> & {
+  iconNode?: Array<[string, Record<string, string | number>]>;
+};
+
+type IconOption = {
+  name: string;
+  label: string;
+  Icon: LucideIconWithNode;
+};
 
 const MOBILE_SAFE_CANVAS_MAX_WIDTH = 720;
 const MOBILE_SAFE_CANVAS_MAX_HEIGHT = 1200;
@@ -83,7 +133,97 @@ const COMMON_COLOR_SWATCHES = [
   '#ec4899'
 ];
 const STROKE_WIDTH_OPTIONS = [0, 1, 2, 3, 4, 6, 8, 12];
+const ICON_SIZE_OPTIONS = [40, 56, 72, 96, 128, 160];
+const ICON_STROKE_WIDTH_OPTIONS = [1, 1.5, 2, 2.5, 3];
 const TEXT_RIGHT_PADDING = 16;
+
+const ICON_OPTIONS: IconOption[] = [
+  { name: 'alarm-clock', label: 'Alarm Clock', Icon: AlarmClock },
+  { name: 'book-open', label: 'Book Open', Icon: BookOpen },
+  { name: 'brain', label: 'Brain', Icon: Brain },
+  { name: 'briefcase', label: 'Briefcase', Icon: Briefcase },
+  { name: 'calculator', label: 'Calculator', Icon: Calculator },
+  { name: 'calendar', label: 'Calendar', Icon: Calendar },
+  { name: 'camera', label: 'Camera', Icon: Camera },
+  { name: 'check-circle-2', label: 'Check Circle', Icon: CheckCircle2 },
+  { name: 'clipboard-list', label: 'Clipboard List', Icon: ClipboardList },
+  { name: 'cloud', label: 'Cloud', Icon: Cloud },
+  { name: 'code-2', label: 'Code', Icon: Code2 },
+  { name: 'compass', label: 'Compass', Icon: Compass },
+  { name: 'dumbbell', label: 'Dumbbell', Icon: Dumbbell },
+  { name: 'file-text', label: 'File Text', Icon: FileText },
+  { name: 'flask-conical', label: 'Flask', Icon: FlaskConical },
+  { name: 'globe', label: 'Globe', Icon: Globe },
+  { name: 'graduation-cap', label: 'Graduation Cap', Icon: GraduationCap },
+  { name: 'heart', label: 'Heart', Icon: Heart },
+  { name: 'help-circle', label: 'Help Circle', Icon: HelpCircle },
+  { name: 'home', label: 'Home', Icon: Home },
+  { name: 'landmark', label: 'Landmark', Icon: Landmark },
+  { name: 'leaf', label: 'Leaf', Icon: Leaf },
+  { name: 'lightbulb', label: 'Lightbulb', Icon: Lightbulb },
+  { name: 'link-2', label: 'Link', Icon: Link2 },
+  { name: 'map', label: 'Map', Icon: MapIcon },
+  { name: 'music-2', label: 'Music', Icon: Music2 },
+  { name: 'palette', label: 'Palette', Icon: Palette },
+  { name: 'pen-square', label: 'Pen Square', Icon: PenSquare },
+  { name: 'rocket', label: 'Rocket', Icon: Rocket },
+  { name: 'shield', label: 'Shield', Icon: Shield },
+  { name: 'shopping-cart', label: 'Shopping Cart', Icon: ShoppingCart },
+  { name: 'smile', label: 'Smile', Icon: Smile },
+  { name: 'sparkles', label: 'Sparkles', Icon: Sparkles },
+  { name: 'star', label: 'Star', Icon: Star },
+  { name: 'target', label: 'Target', Icon: Target },
+  { name: 'trophy', label: 'Trophy', Icon: Trophy },
+  { name: 'users', label: 'Users', Icon: Users },
+  { name: 'wrench', label: 'Wrench', Icon: Wrench }
+];
+
+const ICON_OPTIONS_BY_NAME = new Map(ICON_OPTIONS.map((option) => [option.name, option]));
+
+const escapeXmlAttribute = (value: string) =>
+  value
+    .replaceAll('&', '&amp;')
+    .replaceAll('"', '&quot;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+
+const toIconDataUrl = (
+  Icon: LucideIconWithNode,
+  color: string,
+  strokeWidth: number,
+  strokeOpacity = 1
+): string | null => {
+  const iconWithRender = Icon as unknown as {
+    render?: (props: Record<string, unknown>, ref: null) => { props?: { iconNode?: unknown } };
+  };
+
+  const rendered =
+    typeof iconWithRender.render === 'function'
+      ? iconWithRender.render({ color, size: 24, strokeWidth }, null)
+      : null;
+
+  const iconNode = rendered?.props?.iconNode as Array<[string, Record<string, string | number>]> | undefined;
+  if (!iconNode || iconNode.length === 0) {
+    return null;
+  }
+
+  const children = iconNode
+    .map(([tagName, attributes]) => {
+      const serializedAttributes = Object.entries(attributes)
+        .map(([key, value]) => `${key}="${escapeXmlAttribute(String(value))}"`)
+        .join(' ');
+      return `<${tagName} ${serializedAttributes}></${tagName}>`;
+    })
+    .join('');
+
+  const normalizedOpacity = Math.max(0, Math.min(1, strokeOpacity));
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${escapeXmlAttribute(
+    color
+  )}" stroke-width="${strokeWidth}" stroke-opacity="${normalizedOpacity}" stroke-linecap="round" stroke-linejoin="round">${children}</svg>`;
+
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+};
 
 type ColorModalTarget = 'fill' | 'stroke' | 'background' | null;
 
@@ -437,6 +577,11 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
   const [assetNameDraft, setAssetNameDraft] = useState('');
   const [isSavingAsset, setIsSavingAsset] = useState(false);
   const [saveAssetError, setSaveAssetError] = useState<string | null>(null);
+  const [isIconPickerOpen, setIsIconPickerOpen] = useState(false);
+  const [iconSearchQuery, setIconSearchQuery] = useState('');
+  const [iconSize, setIconSize] = useState(96);
+  const [iconStrokeWidth, setIconStrokeWidth] = useState(2);
+  const [iconInsertError, setIconInsertError] = useState<string | null>(null);
 
   const currentCard = cards[currentIndex];
   const canvas = useEditorStore((state) => state.canvas);
@@ -480,6 +625,13 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     window.addEventListener('resize', updateBounds);
     return () => window.removeEventListener('resize', updateBounds);
   }, []);
+
+  useEffect(() => {
+    if (activeTool === 'icon') {
+      setIsIconPickerOpen(true);
+      setIconInsertError(null);
+    }
+  }, [activeTool]);
 
   useEffect(() => {
     const normalizedEmpty = normalizeCanvasSize(DEFAULT_PORTRAIT_CANVAS);
@@ -834,6 +986,50 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     setSelectedIds([nextNodeId]);
   };
 
+  const closeIconPicker = () => {
+    setIsIconPickerOpen(false);
+    setIconInsertError(null);
+    if (activeTool === 'icon') {
+      setActiveTool('select');
+    }
+  };
+
+  const insertIconToCanvas = (option: IconOption) => {
+    const src = toIconDataUrl(option.Icon, textSettings.color, iconStrokeWidth, shapeSettings.strokeOpacity);
+    if (!src) {
+      setIconInsertError(`Unable to render ${option.label}.`);
+      return;
+    }
+
+    const nextSize = Math.max(24, Math.min(220, iconSize));
+    const nextNodeId = createNodeId('icon');
+    const insertionX = Math.max(0, Math.round((canvas.width - nextSize) / 2));
+    const insertionY = Math.max(0, Math.round((canvas.height - nextSize) / 2));
+
+    const iconNode: CanvasNode = {
+      id: nextNodeId,
+      type: 'image',
+      x: insertionX,
+      y: insertionY,
+      width: nextSize,
+      height: nextSize,
+      src,
+      iconName: option.name,
+      iconColor: textSettings.color,
+      iconStrokeWidth,
+      iconStrokeOpacity: shapeSettings.strokeOpacity
+    };
+
+    setCanvas({
+      ...canvas,
+      nodes: [...canvas.nodes, iconNode]
+    });
+    setSelectedIds([nextNodeId]);
+    setActiveTool('select');
+    setIsIconPickerOpen(false);
+    setIconInsertError(null);
+  };
+
   const updateSelectedTextNodes = (
     updates: Partial<Pick<Extract<CanvasNode, { type: 'text' }>, 'fontFamily' | 'fontSize' | 'fontWeight' | 'fill'>>
   ) => {
@@ -914,6 +1110,34 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
         };
       }
 
+      if (node.type === 'image' && node.iconName) {
+        const iconOption = ICON_OPTIONS_BY_NAME.get(node.iconName);
+        if (!iconOption) return node;
+
+        const nextColor =
+          updates.stroke?.color ?? updates.fill?.color ?? node.iconColor ?? textSettings.color;
+        const nextStrokeWidth = Math.max(
+          0,
+          updates.stroke?.width ?? node.iconStrokeWidth ?? iconStrokeWidth
+        );
+        const nextStrokeOpacity = Math.max(
+          0,
+          Math.min(1, updates.stroke?.opacity ?? node.iconStrokeOpacity ?? shapeSettings.strokeOpacity)
+        );
+
+        const nextSrc = toIconDataUrl(iconOption.Icon, nextColor, nextStrokeWidth, nextStrokeOpacity);
+        if (!nextSrc) return node;
+
+        hasChanges = true;
+        return {
+          ...node,
+          src: nextSrc,
+          iconColor: nextColor,
+          iconStrokeWidth: nextStrokeWidth,
+          iconStrokeOpacity: nextStrokeOpacity
+        };
+      }
+
       return node;
     });
 
@@ -963,11 +1187,15 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
 
   const selectedPrimaryNode = canvas.nodes.find((node) => selectedIds.includes(node.id));
   const selectedPrimaryFillColor = selectedPrimaryNode
-    ? getNodeFillColor(selectedPrimaryNode, textSettings.color)
+    ? selectedPrimaryNode.type === 'image' && selectedPrimaryNode.iconColor
+      ? selectedPrimaryNode.iconColor
+      : getNodeFillColor(selectedPrimaryNode, textSettings.color)
     : textSettings.color;
-  const isShapeToolActive = activeTool === 'rect' || activeTool === 'circle' || activeTool === 'line';
+  const isShapeToolActive = activeTool === 'rect' || activeTool === 'circle' || activeTool === 'line' || activeTool === 'icon';
   const hasSelectedShapeNode = canvas.nodes.some(
-    (node) => selectedIds.includes(node.id) && (node.type === 'rect' || node.type === 'circle' || node.type === 'line')
+    (node) =>
+      selectedIds.includes(node.id) &&
+      (node.type === 'rect' || node.type === 'circle' || node.type === 'line' || (node.type === 'image' && Boolean(node.iconName)))
   );
   const showShapeAppearanceControls = isShapeToolActive || hasSelectedShapeNode;
 
@@ -975,6 +1203,15 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     () => canvas.nodes.filter((node): node is Extract<CanvasNode, { type: 'text' }> => node.type === 'text'),
     [canvas.nodes]
   );
+
+  const filteredIconOptions = useMemo(() => {
+    const query = iconSearchQuery.trim().toLowerCase();
+    if (!query) return ICON_OPTIONS;
+
+    return ICON_OPTIONS.filter((icon) =>
+      `${icon.label} ${icon.name}`.toLowerCase().includes(query)
+    );
+  }, [iconSearchQuery]);
 
   const selectedTextNode = useMemo(() => {
     if (selectedIds.length !== 1) return null;
@@ -1345,6 +1582,17 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
                 </svg>
               </span>
             </Button>
+            <Button
+              variant={activeTool === 'icon' ? 'primary' : 'secondary'}
+              onClick={() => setActiveTool('icon')}
+              aria-label="Icon tool"
+              title="Insert icon"
+              className="h-9 w-full px-0 py-0"
+            >
+              <span className="flex items-center justify-center">
+                <Sparkles width={16} height={16} aria-hidden={true} />
+              </span>
+            </Button>
             </div>
             {activeTool === 'text' ? (
               <div className="space-y-2 rounded-md border border-slate-200 p-2 dark:border-slate-700">
@@ -1378,6 +1626,40 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
                     </option>
                   ))}
                 </Select>
+              </div>
+            ) : null}
+            {activeTool === 'icon' ? (
+              <div className="space-y-2 rounded-md border border-slate-200 p-2 dark:border-slate-700">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Icon</p>
+                <Button variant="secondary" className="w-full" onClick={() => setIsIconPickerOpen(true)}>
+                  Choose icon
+                </Button>
+                <label className="space-y-1 text-xs text-slate-600 dark:text-slate-300">
+                  <span>Size</span>
+                  <Select
+                    value={String(iconSize)}
+                    onChange={(event) => setIconSize(parseNumber(event.target.value, iconSize))}
+                  >
+                    {ICON_SIZE_OPTIONS.map((size) => (
+                      <option key={size} value={size}>
+                        {size}px
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+                <label className="space-y-1 text-xs text-slate-600 dark:text-slate-300">
+                  <span>Stroke width</span>
+                  <Select
+                    value={String(iconStrokeWidth)}
+                    onChange={(event) => setIconStrokeWidth(parseNumber(event.target.value, iconStrokeWidth))}
+                  >
+                    {ICON_STROKE_WIDTH_OPTIONS.map((size) => (
+                      <option key={size} value={size}>
+                        {size}px
+                      </option>
+                    ))}
+                  </Select>
+                </label>
               </div>
             ) : null}
             <div className="space-y-2 rounded-md border border-slate-200 p-2 dark:border-slate-700">
@@ -1779,6 +2061,50 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
             </Button>
             <Button variant="primary" onClick={() => void saveSelectedAsset()} disabled={isSavingAsset}>
               {isSavingAsset ? 'Saving...' : 'Save asset'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+      <Modal open={isIconPickerOpen} title="Insert Icon" onClose={closeIconPicker}>
+        <div className="space-y-3">
+          <Input
+            value={iconSearchQuery}
+            onChange={(event) => setIconSearchQuery(event.target.value)}
+            placeholder="Search icons"
+            aria-label="Search icons"
+            autoFocus
+          />
+          <p className="text-xs text-slate-500">
+            Insert uses the current icon defaults from the left sidebar. You can edit color and stroke after insertion.
+          </p>
+          <div className="max-h-72 overflow-auto rounded-md border border-slate-200 p-2 dark:border-slate-700">
+            {filteredIconOptions.length === 0 ? (
+              <p className="px-2 py-6 text-center text-sm text-slate-500">No icons match that search.</p>
+            ) : (
+              <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
+                {filteredIconOptions.map((option) => {
+                  const { Icon } = option;
+                  return (
+                    <button
+                      key={option.name}
+                      type="button"
+                      className="focus-ring flex h-16 flex-col items-center justify-center gap-1 rounded-md border border-slate-200 text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-800"
+                      onClick={() => insertIconToCanvas(option)}
+                      aria-label={`Insert ${option.label}`}
+                      title={option.label}
+                    >
+                      <Icon size={18} strokeWidth={iconStrokeWidth} color={textSettings.color} aria-hidden={true} />
+                      <span className="max-w-full truncate px-1 text-[10px]">{option.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          {iconInsertError ? <p className="text-sm text-rose-600 dark:text-rose-400">{iconInsertError}</p> : null}
+          <div className="flex justify-end">
+            <Button variant="secondary" onClick={closeIconPicker}>
+              Close
             </Button>
           </div>
         </div>
