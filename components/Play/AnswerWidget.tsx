@@ -63,27 +63,31 @@ export function AnswerWidget({ answerType, schemaJson, onSubmit }: Props) {
 
     if (answerType === 'dropdown') {
       const parsed = dropdownSchema.parse(schemaJson);
+      const selectedIndices = parsed.questions.map((_, index) => dropdownValues[index] ?? 0);
+
       return (
         <div className="space-y-2">
-          {parsed.blanks.map((blank, index) => (
-            <select
-              className="focus-ring w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
-              key={index}
-              value={dropdownValues[index] ?? 0}
-              onChange={(e) => {
-                const next = [...dropdownValues];
-                next[index] = Number(e.target.value);
-                setDropdownValues(next);
-              }}
-            >
-              {blank.options.map((option, optionIndex) => (
-                <option key={option} value={optionIndex}>
-                  {option}
-                </option>
-              ))}
-            </select>
+          {parsed.questions.map((question, index) => (
+            <div className="space-y-1" key={`${question.prompt}-${index}`}>
+              <p className="text-sm font-medium">{question.prompt || `Question ${index + 1}`}</p>
+              <select
+                className="focus-ring w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+                value={selectedIndices[index]}
+                onChange={(e) => {
+                  const next = [...dropdownValues];
+                  next[index] = Number(e.target.value);
+                  setDropdownValues(next);
+                }}
+              >
+                {question.options.map((option, optionIndex) => (
+                  <option key={`${option}-${optionIndex}`} value={optionIndex}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </div>
           ))}
-          <Button onClick={() => onSubmit({ indices: dropdownValues })}>Submit</Button>
+          <Button onClick={() => onSubmit({ indices: selectedIndices })}>Submit</Button>
         </div>
       );
     }

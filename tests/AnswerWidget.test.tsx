@@ -32,4 +32,29 @@ describe('AnswerWidget', () => {
     expect(screen.getByLabelText('A')).toBeInTheDocument();
     expect(screen.getByLabelText('B')).toBeInTheDocument();
   });
+
+  it('renders dropdown questions and submits selected indices', async () => {
+    const onSubmit = vi.fn();
+    render(
+      <AnswerWidget
+        answerType="dropdown"
+        schemaJson={{
+          questions: [
+            { prompt: 'Type of vessel', options: ['Power driven vessel', 'Sailing vessel'], correctIndex: 0 },
+            { prompt: 'Vessel length', options: ['Below 50m', 'Over 50m'], correctIndex: 1 }
+          ]
+        }}
+        onSubmit={onSubmit}
+      />
+    );
+
+    expect(screen.getByText('Type of vessel')).toBeInTheDocument();
+    expect(screen.getByText('Vessel length')).toBeInTheDocument();
+
+    const selects = screen.getAllByRole('combobox');
+    await userEvent.selectOptions(selects[1], '1');
+    await userEvent.click(screen.getByRole('button', { name: 'Submit' }));
+
+    expect(onSubmit).toHaveBeenCalledWith({ indices: [0, 1] });
+  });
 });

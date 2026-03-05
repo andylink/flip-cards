@@ -14,6 +14,7 @@ import { Modal } from '@/components/Common/Modal';
 import { clozeSchema, dropdownSchema, freeFormSchema, mcqSchema } from '@/lib/utils/answerEvaluation';
 import { CANVAS_MIN_HEIGHT, CANVAS_MIN_WIDTH, clampPortraitCanvasSize } from '@/lib/utils/canvas';
 import { CanvasAppearanceDefaults, getNodeFillColor, normalizeCanvasState } from '@/lib/utils/canvasAppearance';
+import { z } from 'zod';
 
 const CanvasStage = dynamic(
   () => import('@/components/CanvasStage').then((module) => module.CanvasStage),
@@ -190,9 +191,38 @@ type ClozeEditorState = {
 };
 
 type DropdownEditorState = {
-  template: string;
-  blanks: Array<{ optionsCsv: string; correctIndex: number }>;
+  questions: Array<{ prompt: string; optionsCsv: string; correctIndex: number }>;
 };
+
+const dropdownEditorSchema = z
+  .object({
+    questions: z.array(
+      z.object({
+        prompt: z.string().default(''),
+        options: z.array(z.string()).default([]),
+        correctIndex: z.number().int().min(0).default(0)
+      })
+    )
+  })
+  .or(
+    z
+      .object({
+        template: z.string(),
+        blanks: z.array(
+          z.object({
+            options: z.array(z.string()).default([]),
+            correctIndex: z.number().int().min(0).default(0)
+          })
+        )
+      })
+      .transform((legacy) => ({
+        questions: legacy.blanks.map((blank, index) => ({
+          prompt: `Question ${index + 1}`,
+          options: blank.options,
+          correctIndex: blank.correctIndex
+        }))
+      }))
+  );
 
 type AnswerDraft = {
   freeform: FreeformEditorState;
@@ -218,8 +248,7 @@ const createDefaultDraft = (): AnswerDraft => ({
     acceptedByBlank: []
   },
   dropdown: {
-    template: '',
-    blanks: []
+    questions: []
   }
 });
 
@@ -263,13 +292,13 @@ const toEditorDraft = (type: AnswerType, schemaJson: unknown): AnswerDraft => {
   }
 
   if (type === 'dropdown') {
-    const parsed = dropdownSchema.safeParse(schemaJson);
+    const parsed = dropdownEditorSchema.safeParse(schemaJson);
     if (parsed.success) {
       base.dropdown = {
-        template: parsed.data.template,
-        blanks: parsed.data.blanks.map((blank) => ({
-          optionsCsv: blank.options.join(','),
-          correctIndex: blank.correctIndex
+        questions: parsed.data.questions.map((question) => ({
+          prompt: question.prompt,
+          optionsCsv: question.options.join(','),
+          correctIndex: question.correctIndex
         }))
       };
     }
@@ -303,15 +332,15 @@ const toPersistedSchema = (type: AnswerType, draft: AnswerDraft): unknown => {
 
   if (type === 'dropdown') {
     return {
-      template: draft.dropdown.template,
-      blanks: draft.dropdown.blanks
-        .filter((blank) => blank !== undefined)
-        .map((blank) => ({
-          options: blank.optionsCsv
+      questions: draft.dropdown.questions
+        .filter((question) => question !== undefined)
+        .map((question) => ({
+          prompt: question.prompt,
+          options: question.optionsCsv
             .split(',')
             .map((item) => item.trim())
             .filter(Boolean),
-          correctIndex: blank.correctIndex
+          correctIndex: question.correctIndex
         }))
     };
   }
@@ -434,7 +463,7 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     setAnswerType(nextType);
     setAnswerDraft(existing ? toEditorDraft(nextType, existing.schema_json) : createDefaultDraft());
     setAnswerLastModifiedAt(null);
-  }, [currentCard]);
+  }, [currentCard?.id]);
 
   useEffect(() => {
     if (!currentCard || !lastModifiedAt) return;
@@ -1152,8 +1181,7 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
             <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Canvas Sizing</h3>
             <p>The canvas is now auto-sized for portrait layouts and scaled responsively to the current viewport.</p>
             <p>
-              Limits: {CANVAS_MIN_WIDTH}-{Math.min(canvasBounds.maxWidth, MOBILE_SAFE_CANVAS_MAX_WIDTH)}px wide and
-              {` `}
+              Limits: {CANVAS_MIN_WIDTH}-{Math.min(canvasBounds.maxWidth, MOBILE_SAFE_CANVAS_MAX_WIDTH)}px wide and{' '}
               {Math.max(CANVAS_MIN_HEIGHT, CANVAS_MIN_WIDTH)}-{Math.min(canvasBounds.maxHeight, MOBILE_SAFE_CANVAS_MAX_HEIGHT)}px tall.
             </p>
           </section>
@@ -1207,8 +1235,7 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
             ) : null}
             {answerType === 'dropdown' ? (
               <DropdownEditor
-                template={answerDraft.dropdown.template}
-                blanks={answerDraft.dropdown.blanks}
+                questions={answerDraft.dropdown.questions}
                 onChange={(next) => {
                   setAnswerDraft((prev) => ({ ...prev, dropdown: next }));
                   setAnswerLastModifiedAt(Date.now());

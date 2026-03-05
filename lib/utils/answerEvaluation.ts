@@ -24,14 +24,33 @@ export const clozeSchema = z.object({
 });
 
 export const dropdownSchema = z.object({
-  template: z.string(),
-  blanks: z.array(
+  questions: z.array(
     z.object({
+      prompt: z.string(),
       options: z.array(z.string()).min(2),
       correctIndex: z.number().int().min(0)
     })
   )
-});
+}).or(
+  // Backward compatibility for older stored dropdown schemas.
+  z
+    .object({
+      template: z.string(),
+      blanks: z.array(
+        z.object({
+          options: z.array(z.string()).min(2),
+          correctIndex: z.number().int().min(0)
+        })
+      )
+    })
+    .transform((legacy) => ({
+      questions: legacy.blanks.map((blank, index) => ({
+        prompt: `Question ${index + 1}`,
+        options: blank.options,
+        correctIndex: blank.correctIndex
+      }))
+    }))
+);
 
 const normalize = (value: string, trim: boolean, caseSensitive: boolean) => {
   const nextValue = trim ? value.trim() : value;
@@ -63,7 +82,7 @@ export function evaluateAnswer(type: AnswerType, schemaJson: unknown, responseJs
     case 'dropdown': {
       const schema = dropdownSchema.parse(schemaJson);
       const response = z.object({ indices: z.array(z.number().int()) }).parse(responseJson);
-      return schema.blanks.every((blank, index) => response.indices[index] === blank.correctIndex);
+      return schema.questions.every((question, index) => response.indices[index] === question.correctIndex);
     }
     case 'cloze': {
       const schema = clozeSchema.parse(schemaJson);

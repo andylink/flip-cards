@@ -22,7 +22,22 @@ describe('evaluateAnswer', () => {
     expect(correct).toBe(true);
   });
 
-  it('evaluates dropdown answers with all blanks correct', () => {
+  it('evaluates dropdown answers with all questions correct', () => {
+    const correct = evaluateAnswer(
+      'dropdown',
+      {
+        questions: [
+          { prompt: 'Question 1', options: ['a', 'b'], correctIndex: 0 },
+          { prompt: 'Question 2', options: ['c', 'd'], correctIndex: 1 }
+        ]
+      },
+      { indices: [0, 1] }
+    );
+
+    expect(correct).toBe(true);
+  });
+
+  it('supports legacy dropdown schemas', () => {
     const correct = evaluateAnswer(
       'dropdown',
       {
