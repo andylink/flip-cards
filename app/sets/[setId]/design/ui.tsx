@@ -10,6 +10,7 @@ import { ClozeEditor, DropdownEditor, FreeFormEditor, MCQEditor } from '@/compon
 import { Select } from '@/components/Common/Select';
 import { Button } from '@/components/Common/Button';
 import { Input } from '@/components/Common/Input';
+import { Modal } from '@/components/Common/Modal';
 import { clozeSchema, dropdownSchema, freeFormSchema, mcqSchema } from '@/lib/utils/answerEvaluation';
 import { CANVAS_MIN_HEIGHT, CANVAS_MIN_WIDTH, clampPortraitCanvasSize } from '@/lib/utils/canvas';
 import { CanvasAppearanceDefaults, getNodeFillColor, normalizeCanvasState } from '@/lib/utils/canvasAppearance';
@@ -66,8 +67,23 @@ const FONT_OPTIONS = [
 ];
 
 const FONT_SIZE_OPTIONS = [16, 20, 24, 28, 32, 40, 48, 56];
-const COLOR_SWATCHES = ['#000000', '#1d4ed8', '#059669', '#ea580c', '#be123c', '#7c3aed', '#334155', '#ffffff'];
+const COMMON_COLOR_SWATCHES = [
+  '#000000',
+  '#ffffff',
+  '#334155',
+  '#64748b',
+  '#ef4444',
+  '#f97316',
+  '#eab308',
+  '#22c55e',
+  '#06b6d4',
+  '#3b82f6',
+  '#8b5cf6',
+  '#ec4899'
+];
 const STROKE_WIDTH_OPTIONS = [0, 1, 2, 3, 4, 6, 8, 12];
+
+type ColorModalTarget = 'fill' | 'stroke' | 'background' | null;
 
 type ShapeSettings = {
   fillEnabled: boolean;
@@ -335,6 +351,7 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
   const [answerType, setAnswerType] = useState<AnswerType>('freeform');
   const [answerDraft, setAnswerDraft] = useState<AnswerDraft>(createDefaultDraft());
   const [answerLastModifiedAt, setAnswerLastModifiedAt] = useState<number | null>(null);
+  const [activeColorModal, setActiveColorModal] = useState<ColorModalTarget>(null);
 
   const currentCard = cards[currentIndex];
   const canvas = useEditorStore((state) => state.canvas);
@@ -715,6 +732,11 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
   const selectedPrimaryFillColor = selectedPrimaryNode
     ? getNodeFillColor(selectedPrimaryNode, textSettings.color)
     : textSettings.color;
+  const isShapeToolActive = activeTool === 'rect' || activeTool === 'circle' || activeTool === 'line';
+  const hasSelectedShapeNode = canvas.nodes.some(
+    (node) => selectedIds.includes(node.id) && (node.type === 'rect' || node.type === 'circle' || node.type === 'line')
+  );
+  const showShapeAppearanceControls = isShapeToolActive || hasSelectedShapeNode;
 
   const alignSelectedToCanvas = (alignment: CanvasAlignment) => {
     const selected = new Set(selectedIds);
@@ -763,6 +785,36 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     setCanvas({ ...canvas, backgroundColor });
   };
 
+  const getModalState = () => {
+    if (activeColorModal === 'fill') {
+      return {
+        title: 'Pick Fill Color',
+        value: selectedPrimaryFillColor,
+        onChange: handleFillColorChange
+      };
+    }
+
+    if (activeColorModal === 'stroke') {
+      return {
+        title: 'Pick Stroke Color',
+        value: shapeSettings.strokeColor,
+        onChange: handleStrokeColorChange
+      };
+    }
+
+    if (activeColorModal === 'background') {
+      return {
+        title: 'Pick Card Background',
+        value: canvas.backgroundColor ?? DEFAULT_CANVAS_BACKGROUND,
+        onChange: setCanvasBackgroundColor
+      };
+    }
+
+    return null;
+  };
+
+  const colorModalState = getModalState();
+
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -778,73 +830,108 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
         onDuplicate={duplicateCurrentCard}
         onDelete={deleteCurrentCard}
       />
+      
       <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)_420px]">
         <aside className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+           <div className="mb-3 space-y-2 rounded-md border border-slate-200 p-2 dark:border-slate-700">
+               
+                <button
+                  type="button"
+                  className="focus-ring inline-flex h-10 w-full items-center justify-between rounded-md border border-slate-300 bg-white px-3 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                  onClick={() => setActiveColorModal('background')}
+                  aria-label="Open card background color picker"
+                >
+                  <span>Card background color</span>
+                  <span
+                    aria-hidden="true"
+                    className="h-5 w-5 rounded border border-slate-300 dark:border-slate-500"
+                    style={{ backgroundColor: canvas.backgroundColor ?? DEFAULT_CANVAS_BACKGROUND }}
+                  />
+                </button>
+             
+              </div>
           <div className="space-y-3">
+            <div className="grid grid-cols-3 gap-2">
             <Button
               variant={activeTool === 'select' ? 'primary' : 'secondary'}
               onClick={() => setActiveTool('select')}
               aria-label="Select tool"
-              className="w-full"
+              title="Select"
+              className="h-9 w-full px-0 py-0"
             >
-              <span className="flex items-center justify-center gap-2">
+              <span className="flex items-center justify-center">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                   <path d="M4 3l14 9-6 1 3 7-3 1-3-7-5 4V3z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-                Select
               </span>
             </Button>
             <Button
               variant={activeTool === 'move' ? 'primary' : 'secondary'}
               onClick={() => setActiveTool('move')}
               aria-label="Move tool"
-              className="w-full"
+              title="Move"
+              className="h-9 w-full px-0 py-0"
             >
-              <span className="flex items-center justify-center gap-2">
+              <span className="flex items-center justify-center">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                   <path d="M12 3v18M3 12h18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                   <path d="m12 3 3 3m-3-3-3 3M12 21l3-3m-3 3-3-3M3 12l3-3m-3 3 3 3M21 12l-3-3m3 3-3 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-                Move
               </span>
             </Button>
             <Button
               variant={activeTool === 'text' ? 'primary' : 'secondary'}
               onClick={() => setActiveTool('text')}
               aria-label="Text tool"
-              className="w-full"
+              title="Text"
+              className="h-9 w-full px-0 py-0"
             >
-              <span className="flex items-center justify-center gap-2">
+              <span className="flex items-center justify-center">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                   <path d="M4 6h16M12 6v12M8 18h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-                Text
               </span>
             </Button>
             <Button
               variant={activeTool === 'rect' ? 'primary' : 'secondary'}
               onClick={() => setActiveTool('rect')}
               aria-label="Rectangle tool"
-              className="w-full"
+              title="Rectangle"
+              className="h-9 w-full px-0 py-0"
             >
-              Rectangle
+              <span className="flex items-center justify-center">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <rect x="5" y="6" width="14" height="12" rx="1" stroke="currentColor" strokeWidth="2" />
+                </svg>
+              </span>
             </Button>
             <Button
               variant={activeTool === 'circle' ? 'primary' : 'secondary'}
               onClick={() => setActiveTool('circle')}
               aria-label="Circle tool"
-              className="w-full"
+              title="Circle"
+              className="h-9 w-full px-0 py-0"
             >
-              Circle
+              <span className="flex items-center justify-center">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <circle cx="12" cy="12" r="6" stroke="currentColor" strokeWidth="2" />
+                </svg>
+              </span>
             </Button>
             <Button
               variant={activeTool === 'line' ? 'primary' : 'secondary'}
               onClick={() => setActiveTool('line')}
               aria-label="Line tool"
-              className="w-full"
+              title="Line"
+              className="h-9 w-full px-0 py-0"
             >
-              Line
+              <span className="flex items-center justify-center">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M5 18 19 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </span>
             </Button>
+            </div>
             {activeTool === 'text' ? (
               <div className="space-y-2 rounded-md border border-slate-200 p-2 dark:border-slate-700">
                 <Select
@@ -881,88 +968,85 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
             ) : null}
             <div className="space-y-2 rounded-md border border-slate-200 p-2 dark:border-slate-700">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Appearance</p>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="color"
-                  value={selectedPrimaryFillColor}
-                  onChange={(event) => handleFillColorChange(event.target.value)}
-                  aria-label="Fill color"
-                  className="h-10 w-16 cursor-pointer p-1"
+              <button
+                type="button"
+                className="focus-ring inline-flex h-10 w-full items-center justify-between rounded-md border border-slate-300 bg-white px-3 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                onClick={() => setActiveColorModal('fill')}
+                aria-label="Open fill color picker"
+              >
+                <span>Fill color</span>
+                <span
+                  aria-hidden="true"
+                  className="h-5 w-5 rounded border border-slate-300 dark:border-slate-500"
+                  style={{ backgroundColor: selectedPrimaryFillColor }}
                 />
-                <span className="text-xs text-slate-500">Fill color for selected nodes and new text/shapes.</span>
-              </div>
-              <div className="grid grid-cols-4 gap-2">
-                {COLOR_SWATCHES.map((color) => (
+              </button>
+              {showShapeAppearanceControls ? (
+                <>
+                  <label className="flex items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-300">
+                    Fill enabled
+                    <input
+                      type="checkbox"
+                      checked={shapeSettings.fillEnabled}
+                      onChange={(event) => handleFillEnabledChange(event.target.checked)}
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-600 dark:text-slate-300">
+                    <span>Fill opacity ({Math.round(shapeSettings.fillOpacity * 100)}%)</span>
+                    <Input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={Math.round(shapeSettings.fillOpacity * 100)}
+                      onChange={(event) => handleFillOpacityChange(parseNumber(event.target.value, 100) / 100)}
+                    />
+                  </label>
                   <button
-                    key={color}
                     type="button"
-                    aria-label={`Select fill color ${color}`}
-                    title={color}
-                    onClick={() => handleFillColorChange(color)}
-                    className="h-7 w-full rounded border border-slate-300 transition hover:scale-[1.03] dark:border-slate-600"
-                    style={{ backgroundColor: color }}
-                  />
-                ))}
-              </div>
-              <label className="flex items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-300">
-                Fill enabled
-                <input
-                  type="checkbox"
-                  checked={shapeSettings.fillEnabled}
-                  onChange={(event) => handleFillEnabledChange(event.target.checked)}
-                />
-              </label>
-              <label className="space-y-1 text-xs text-slate-600 dark:text-slate-300">
-                <span>Fill opacity ({Math.round(shapeSettings.fillOpacity * 100)}%)</span>
-                <Input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={Math.round(shapeSettings.fillOpacity * 100)}
-                  onChange={(event) => handleFillOpacityChange(parseNumber(event.target.value, 100) / 100)}
-                />
-              </label>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="color"
-                  value={shapeSettings.strokeColor}
-                  onChange={(event) => handleStrokeColorChange(event.target.value)}
-                  aria-label="Stroke color"
-                  className="h-10 w-16 cursor-pointer p-1"
-                />
-                <span className="text-xs text-slate-500">Stroke color for selected shape nodes.</span>
-              </div>
-              <label className="flex items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-300">
-                Stroke enabled
-                <input
-                  type="checkbox"
-                  checked={shapeSettings.strokeEnabled}
-                  onChange={(event) => handleStrokeEnabledChange(event.target.checked)}
-                />
-              </label>
-              <label className="space-y-1 text-xs text-slate-600 dark:text-slate-300">
-                <span>Stroke width</span>
-                <Select
-                  value={String(shapeSettings.strokeWidth)}
-                  onChange={(event) => handleStrokeWidthChange(parseNumber(event.target.value, shapeSettings.strokeWidth))}
-                >
-                  {STROKE_WIDTH_OPTIONS.map((size) => (
-                    <option key={size} value={size}>
-                      {size}px
-                    </option>
-                  ))}
-                </Select>
-              </label>
-              <label className="space-y-1 text-xs text-slate-600 dark:text-slate-300">
-                <span>Stroke opacity ({Math.round(shapeSettings.strokeOpacity * 100)}%)</span>
-                <Input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={Math.round(shapeSettings.strokeOpacity * 100)}
-                  onChange={(event) => handleStrokeOpacityChange(parseNumber(event.target.value, 100) / 100)}
-                />
-              </label>
+                    className="focus-ring inline-flex h-10 w-full items-center justify-between rounded-md border border-slate-300 bg-white px-3 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                    onClick={() => setActiveColorModal('stroke')}
+                    aria-label="Open stroke color picker"
+                  >
+                    <span>Stroke color</span>
+                    <span
+                      aria-hidden="true"
+                      className="h-5 w-5 rounded border border-slate-300 dark:border-slate-500"
+                      style={{ backgroundColor: shapeSettings.strokeColor }}
+                    />
+                  </button>
+                  <label className="flex items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-300">
+                    Stroke enabled
+                    <input
+                      type="checkbox"
+                      checked={shapeSettings.strokeEnabled}
+                      onChange={(event) => handleStrokeEnabledChange(event.target.checked)}
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-600 dark:text-slate-300">
+                    <span>Stroke width</span>
+                    <Select
+                      value={String(shapeSettings.strokeWidth)}
+                      onChange={(event) => handleStrokeWidthChange(parseNumber(event.target.value, shapeSettings.strokeWidth))}
+                    >
+                      {STROKE_WIDTH_OPTIONS.map((size) => (
+                        <option key={size} value={size}>
+                          {size}px
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-600 dark:text-slate-300">
+                    <span>Stroke opacity ({Math.round(shapeSettings.strokeOpacity * 100)}%)</span>
+                    <Input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={Math.round(shapeSettings.strokeOpacity * 100)}
+                      onChange={(event) => handleStrokeOpacityChange(parseNumber(event.target.value, 100) / 100)}
+                    />
+                  </label>
+                </>
+              ) : null}
             </div>
             {activeTool === 'select' ? (
               <div className="space-y-2">
@@ -1075,33 +1159,6 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
           </section>
 
           <section className="space-y-2 rounded-md border border-slate-200 p-3 dark:border-slate-700">
-            <h3 className="text-sm font-semibold">Card Background</h3>
-            <div className="flex items-center gap-2">
-              <Input
-                type="color"
-                value={canvas.backgroundColor ?? DEFAULT_CANVAS_BACKGROUND}
-                onChange={(event) => setCanvasBackgroundColor(event.target.value)}
-                aria-label="Canvas background color"
-                className="h-10 w-16 cursor-pointer p-1"
-              />
-              <span className="text-xs text-slate-500">Applies to this card only.</span>
-            </div>
-            <div className="grid grid-cols-4 gap-2">
-              {COLOR_SWATCHES.map((color) => (
-                <button
-                  key={`canvas-bg-${color}`}
-                  type="button"
-                  aria-label={`Set canvas background ${color}`}
-                  title={color}
-                  onClick={() => setCanvasBackgroundColor(color)}
-                  className="h-7 w-full rounded border border-slate-300 transition hover:scale-[1.03] dark:border-slate-600"
-                  style={{ backgroundColor: color }}
-                />
-              ))}
-            </div>
-          </section>
-
-          <section className="space-y-2 rounded-md border border-slate-200 p-3 dark:border-slate-700">
             <h2 className="text-sm font-semibold">Answer Builder</h2>
             <Select
               value={answerType}
@@ -1161,6 +1218,49 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
           </section>
         </aside>
       </div>
+      <Modal
+        open={Boolean(colorModalState)}
+        title={colorModalState?.title ?? 'Pick Color'}
+        onClose={() => setActiveColorModal(null)}
+      >
+        {colorModalState ? (
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <Input
+                type="color"
+                value={colorModalState.value}
+                onChange={(event) => colorModalState.onChange(event.target.value)}
+                aria-label="Color picker"
+                className="h-10 w-20 cursor-pointer p-1"
+              />
+              <code className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                {colorModalState.value}
+              </code>
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Common colors</p>
+              <div className="grid grid-cols-6 gap-2">
+                {COMMON_COLOR_SWATCHES.map((color) => (
+                  <button
+                    key={`${activeColorModal}-${color}`}
+                    type="button"
+                    aria-label={`Select color ${color}`}
+                    title={color}
+                    onClick={() => colorModalState.onChange(color)}
+                    className="h-8 rounded border border-slate-300 transition hover:scale-[1.03] dark:border-slate-600"
+                    style={{ backgroundColor: color }}
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <Button variant="secondary" onClick={() => setActiveColorModal(null)}>
+                Done
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }
