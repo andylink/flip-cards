@@ -1,6 +1,6 @@
 'use client';
 
-import { type ComponentType, useEffect, useMemo, useState } from 'react';
+import { type ChangeEvent, type ComponentType, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import {
   AlarmClock,
@@ -71,7 +71,7 @@ type Props = {
   >;
 };
 
-type CanvasTool = 'select' | 'move' | 'text' | 'rect' | 'circle' | 'line' | 'icon';
+type CanvasTool = 'select' | 'move' | 'text' | 'rect' | 'circle' | 'line' | 'icon' | 'image';
 
 type LucideIconWithNode = ComponentType<any> & {
   iconNode?: Array<[string, Record<string, string | number>]>;
@@ -135,6 +135,9 @@ const COMMON_COLOR_SWATCHES = [
 const STROKE_WIDTH_OPTIONS = [0, 1, 2, 3, 4, 6, 8, 12];
 const ICON_SIZE_OPTIONS = [40, 56, 72, 96, 128, 160];
 const ICON_STROKE_WIDTH_OPTIONS = [1, 1.5, 2, 2.5, 3];
+const IMAGE_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+const IMAGE_ALLOWED_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+const IMAGE_ALLOWED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
 const TEXT_RIGHT_PADDING = 16;
 
 const ICON_OPTIONS: IconOption[] = [
@@ -266,6 +269,29 @@ const createNodeId = (prefix = 'node'): string => {
 
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
+
+const getFileExtension = (fileName: string): string => {
+  const dotIndex = fileName.lastIndexOf('.');
+  return dotIndex >= 0 ? fileName.slice(dotIndex).toLowerCase() : '';
+};
+
+const loadImageDimensions = (file: File): Promise<{ width: number; height: number }> =>
+  new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new window.Image();
+
+    image.onload = () => {
+      resolve({ width: image.naturalWidth, height: image.naturalHeight });
+      URL.revokeObjectURL(objectUrl);
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Unable to read image dimensions.'));
+    };
+
+    image.src = objectUrl;
+  });
 
 const cloneCanvasNode = (node: CanvasNode): CanvasNode => JSON.parse(JSON.stringify(node));
 
@@ -582,6 +608,11 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
   const [iconSize, setIconSize] = useState(96);
   const [iconStrokeWidth, setIconStrokeWidth] = useState(2);
   const [iconInsertError, setIconInsertError] = useState<string | null>(null);
+  const [isImagePickerOpen, setIsImagePickerOpen] = useState(false);
+  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [imageInsertError, setImageInsertError] = useState<string | null>(null);
+  const imageFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const currentCard = cards[currentIndex];
   const canvas = useEditorStore((state) => state.canvas);
@@ -630,6 +661,13 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     if (activeTool === 'icon') {
       setIsIconPickerOpen(true);
       setIconInsertError(null);
+    }
+  }, [activeTool]);
+
+  useEffect(() => {
+    if (activeTool === 'image') {
+      setIsImagePickerOpen(true);
+      setImageInsertError(null);
     }
   }, [activeTool]);
 
@@ -1028,6 +1066,149 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     setActiveTool('select');
     setIsIconPickerOpen(false);
     setIconInsertError(null);
+  };
+
+  const closeImagePicker = () => {
+    if (isUploadingImage) return;
+    setIsImagePickerOpen(false);
+    setSelectedImageFile(null);
+    setImageInsertError(null);
+    if (imageFileInputRef.current) {
+      imageFileInputRef.current.value = '';
+    }
+    if (activeTool === 'image') {
+      setActiveTool('select');
+    }
+  };
+
+  const validateImageFile = (file: File): string | null => {
+    const extension = getFileExtension(file.name);
+    const hasAllowedExtension = IMAGE_ALLOWED_EXTENSIONS.has(extension);
+    const hasAllowedMime = IMAGE_ALLOWED_MIME_TYPES.has(file.type);
+
+    if (!hasAllowedExtension || !hasAllowedMime) {
+      return 'Unsupported file type. Allowed formats: PNG, JPEG, WEBP, GIF.';
+    }
+
+    if (file.size <= 0) {
+      return 'Selected file is empty.';
+    }
+
+    if (file.size > IMAGE_MAX_FILE_SIZE_BYTES) {
+      return 'Image is too large. Maximum size is 10MB.';
+    }
+
+    return null;
+  };
+
+  const onImageFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+
+    if (!file) {
+      setSelectedImageFile(null);
+      setImageInsertError(null);
+      return;
+    }
+
+    const validationError = validateImageFile(file);
+    if (validationError) {
+      setSelectedImageFile(null);
+      setImageInsertError(validationError);
+      if (imageFileInputRef.current) {
+        imageFileInputRef.current.value = '';
+      }
+      return;
+    }
+
+    setSelectedImageFile(file);
+    setImageInsertError(null);
+  };
+
+  const insertSelectedImageToCanvas = async () => {
+    if (!selectedImageFile) {
+      setImageInsertError('Select an image to insert.');
+      return;
+    }
+
+    const validationError = validateImageFile(selectedImageFile);
+    if (validationError) {
+      setImageInsertError(validationError);
+      return;
+    }
+
+    setIsUploadingImage(true);
+    setImageInsertError(null);
+
+    try {
+      const dimensions = await loadImageDimensions(selectedImageFile);
+      const signResponse = await fetch('/api/storage/sign-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName: selectedImageFile.name,
+          contentType: selectedImageFile.type
+        })
+      });
+
+      const signPayload = (await signResponse.json()) as {
+        error?: string;
+        path?: string;
+        token?: string;
+      };
+
+      if (!signResponse.ok || !signPayload.path || !signPayload.token) {
+        throw new Error(signPayload.error ?? 'Unable to prepare image upload.');
+      }
+
+      const { error: uploadError } = await supabase
+        .storage
+        .from('card-assets')
+        .uploadToSignedUrl(signPayload.path, signPayload.token, selectedImageFile);
+
+      if (uploadError) {
+        throw new Error(uploadError.message);
+      }
+
+      const maxNodeWidth = Math.max(120, Math.round(canvas.width * 0.75));
+      const maxNodeHeight = Math.max(120, Math.round(canvas.height * 0.75));
+      const widthRatio = maxNodeWidth / dimensions.width;
+      const heightRatio = maxNodeHeight / dimensions.height;
+      const ratio = Math.min(1, widthRatio, heightRatio);
+      const nodeWidth = Math.max(24, Math.round(dimensions.width * ratio));
+      const nodeHeight = Math.max(24, Math.round(dimensions.height * ratio));
+      const nextNodeId = createNodeId('image');
+      const imageSrc = `/api/storage/object?path=${encodeURIComponent(signPayload.path)}`;
+
+      const imageNode: CanvasNode = {
+        id: nextNodeId,
+        type: 'image',
+        x: Math.max(0, Math.round((canvas.width - nodeWidth) / 2)),
+        y: Math.max(0, Math.round((canvas.height - nodeHeight) / 2)),
+        width: nodeWidth,
+        height: nodeHeight,
+        src: imageSrc,
+        assetPath: signPayload.path,
+        assetMimeType: selectedImageFile.type,
+        assetFileName: selectedImageFile.name
+      };
+
+      setCanvas({
+        ...canvas,
+        nodes: [...canvas.nodes, imageNode]
+      });
+      setSelectedIds([nextNodeId]);
+      setActiveTool('select');
+      setIsImagePickerOpen(false);
+      setSelectedImageFile(null);
+      setImageInsertError(null);
+      if (imageFileInputRef.current) {
+        imageFileInputRef.current.value = '';
+      }
+    } catch (error) {
+      setImageInsertError(error instanceof Error ? error.message : 'Unable to insert image.');
+    } finally {
+      setIsUploadingImage(false);
+    }
   };
 
   const updateSelectedTextNodes = (
@@ -1593,6 +1774,21 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
                 <Sparkles width={16} height={16} aria-hidden={true} />
               </span>
             </Button>
+            <Button
+              variant={activeTool === 'image' ? 'primary' : 'secondary'}
+              onClick={() => setActiveTool('image')}
+              aria-label="Image tool"
+              title="Insert image"
+              className="h-9 w-full px-0 py-0"
+            >
+              <span className="flex items-center justify-center">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="2" />
+                  <circle cx="9" cy="10" r="1.5" fill="currentColor" />
+                  <path d="m7 17 4-4 3 3 3-3 2 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </span>
+            </Button>
             </div>
             {activeTool === 'text' ? (
               <div className="space-y-2 rounded-md border border-slate-200 p-2 dark:border-slate-700">
@@ -1660,6 +1856,17 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
                     ))}
                   </Select>
                 </label>
+              </div>
+            ) : null}
+            {activeTool === 'image' ? (
+              <div className="space-y-2 rounded-md border border-slate-200 p-2 dark:border-slate-700">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Image</p>
+                <Button variant="secondary" className="w-full" onClick={() => setIsImagePickerOpen(true)}>
+                  Choose image
+                </Button>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Supported: PNG, JPEG, WEBP, GIF (max 10MB).
+                </p>
               </div>
             ) : null}
             <div className="space-y-2 rounded-md border border-slate-200 p-2 dark:border-slate-700">
@@ -2105,6 +2312,40 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
           <div className="flex justify-end">
             <Button variant="secondary" onClick={closeIconPicker}>
               Close
+            </Button>
+          </div>
+        </div>
+      </Modal>
+      <Modal open={isImagePickerOpen} title="Insert Image" onClose={closeImagePicker}>
+        <div className="space-y-3">
+          <label className="space-y-1 text-xs text-slate-600 dark:text-slate-300">
+            <span>Image file</span>
+            <input
+              ref={imageFileInputRef}
+              type="file"
+              accept=".png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,image/webp,image/gif"
+              className="focus-ring block w-full rounded-md border border-slate-300 bg-white px-2 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+              onChange={onImageFileChange}
+              disabled={isUploadingImage}
+            />
+          </label>
+          <p className="text-xs text-slate-500">Supported formats: PNG, JPEG, WEBP, GIF. Maximum size: 10MB.</p>
+          {selectedImageFile ? (
+            <p className="text-xs text-slate-600 dark:text-slate-300">
+              Selected: <span className="font-medium">{selectedImageFile.name}</span> ({Math.max(1, Math.round(selectedImageFile.size / 1024))} KB)
+            </p>
+          ) : null}
+          {imageInsertError ? <p className="text-sm text-rose-600 dark:text-rose-400">{imageInsertError}</p> : null}
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={closeImagePicker} disabled={isUploadingImage}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => void insertSelectedImageToCanvas()}
+              disabled={!selectedImageFile || isUploadingImage}
+            >
+              {isUploadingImage ? 'Uploading...' : 'Insert image'}
             </Button>
           </div>
         </div>

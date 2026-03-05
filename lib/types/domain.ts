@@ -70,6 +70,9 @@ export type ImageNode = CanvasNodeBase & {
   width?: number;
   height?: number;
   src?: string;
+  assetPath?: string;
+  assetMimeType?: string;
+  assetFileName?: string;
   // Optional icon metadata for editable vector icons serialized as SVG data URLs.
   iconName?: string;
   iconColor?: string;

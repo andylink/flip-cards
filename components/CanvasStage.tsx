@@ -9,7 +9,7 @@ import { toKonvaFill, toKonvaStroke } from '@/lib/utils/canvasAppearance';
 
 const GRID = 8;
 
-type CanvasTool = 'select' | 'move' | 'text' | 'rect' | 'circle' | 'line' | 'icon';
+type CanvasTool = 'select' | 'move' | 'text' | 'rect' | 'circle' | 'line' | 'icon' | 'image';
 
 type ImageNode = Extract<CanvasNode, { type: 'image' }>;
 
@@ -766,7 +766,7 @@ export function CanvasStage({
                 ? 'grab'
                 : activeTool === 'rect' || activeTool === 'circle' || activeTool === 'line'
                 ? 'crosshair'
-                    : activeTool === 'icon'
+                    : activeTool === 'icon' || activeTool === 'image'
                     ? 'copy'
                 : 'default'
           }}
