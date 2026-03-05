@@ -22,13 +22,6 @@ type Props = {
   userId: string | null;
 };
 
-const scoreMap: Record<'again' | 'hard' | 'good' | 'easy', number> = {
-  again: 0,
-  hard: 1,
-  good: 2,
-  easy: 3
-};
-
 export function PlayClient({ setId, setTitle, initialCards, userId }: Props) {
   const supabase = useMemo(() => createClient(), []);
   const [cards] = useState(() => [...initialCards].sort(() => Math.random() - 0.5));
@@ -64,11 +57,11 @@ export function PlayClient({ setId, setTitle, initialCards, userId }: Props) {
     return data.id;
   };
 
-  const completeAttempt = async (confidence: keyof typeof scoreMap) => {
+  const completeAttempt = async () => {
     if (!pending) return;
 
     const activeSessionId = await ensureSession();
-    const scoreDelta = scoreMap[confidence] + (pending.correct ? 1 : 0);
+    const scoreDelta = pending.correct ? 1 : 0;
 
     await supabase.from('attempts').insert({
       session_id: activeSessionId,
@@ -83,9 +76,7 @@ export function PlayClient({ setId, setTitle, initialCards, userId }: Props) {
     setFeedback(pending.correct ? 'Correct!' : 'Incorrect');
     setPending(null);
 
-    if (index < cards.length - 1) {
-      setIndex((value) => value + 1);
-    }
+    setIndex((value) => value + 1);
   };
 
   if (cards.length === 0) {
@@ -130,20 +121,11 @@ export function PlayClient({ setId, setTitle, initialCards, userId }: Props) {
             }}
           />
           {revealEnabled ? <p className="text-sm text-slate-600 dark:text-slate-300">{feedback}</p> : null}
-          <div className="flex flex-wrap gap-2 border-t border-slate-200 pt-4 dark:border-slate-700">
-            <Button onClick={() => completeAttempt('again')} variant="secondary" disabled={!pending}>
-              Again
-            </Button>
-            <Button onClick={() => completeAttempt('hard')} variant="secondary" disabled={!pending}>
-              Hard
-            </Button>
-            <Button onClick={() => completeAttempt('good')} disabled={!pending}>
-              Good
-            </Button>
-            <Button onClick={() => completeAttempt('easy')} disabled={!pending}>
-              Easy
-            </Button>
-          </div>
+          {pending ? (
+            <div className="border-t border-slate-200 pt-4 dark:border-slate-700">
+              <Button onClick={completeAttempt}>{index === cards.length - 1 ? 'Finish' : 'Next'}</Button>
+            </div>
+          ) : null}
         </section>
       </div>
     </div>
