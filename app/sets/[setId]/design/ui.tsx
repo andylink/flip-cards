@@ -477,6 +477,29 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     return () => clearTimeout(timeout);
   }, [answerDraft, answerLastModifiedAt, answerType, currentCard, supabase]);
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const targetTag = target?.tagName;
+      const isTypingTarget =
+        targetTag === 'INPUT' ||
+        targetTag === 'TEXTAREA' ||
+        targetTag === 'SELECT' ||
+        Boolean(target?.isContentEditable);
+
+      if (isTypingTarget) return;
+
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'd') {
+        if (selectedIds.length === 0) return;
+        event.preventDefault();
+        duplicateSelection();
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [duplicateSelection, selectedIds]);
+
   const addCard = async () => {
     const orderIndex = cards.length;
     const normalizedDefault = normalizeCanvasSize(DEFAULT_PORTRAIT_CANVAS);
@@ -939,6 +962,14 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
                     </svg>
                   </Button>
                 </div>
+                <Button
+                  variant="secondary"
+                  className="w-full"
+                  onClick={duplicateSelection}
+                  disabled={selectedIds.length === 0}
+                >
+                  Duplicate Selected
+                </Button>
                 <Button variant="danger" className="w-full" onClick={deleteSelection} disabled={selectedIds.length === 0}>
                   Delete Selected
                 </Button>
