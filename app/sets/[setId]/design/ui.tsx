@@ -112,6 +112,23 @@ type CanvasAlignment =
   | 'v-center'
   | 'bottom';
 
+type SavedAssetRecord = {
+  id: string;
+  name: string;
+  node_json: CanvasNode;
+  created_at: string;
+};
+
+const createNodeId = (prefix = 'node'): string => {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
+const cloneCanvasNode = (node: CanvasNode): CanvasNode => JSON.parse(JSON.stringify(node));
+
 const getNodeBounds = (node: CanvasNode, canvasWidth: number): NodeBounds | null => {
   if (node.hidden) return null;
 
@@ -412,6 +429,14 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
   const [answerDraft, setAnswerDraft] = useState<AnswerDraft>(createDefaultDraft());
   const [answerLastModifiedAt, setAnswerLastModifiedAt] = useState<number | null>(null);
   const [activeColorModal, setActiveColorModal] = useState<ColorModalTarget>(null);
+  const [savedAssets, setSavedAssets] = useState<SavedAssetRecord[]>([]);
+  const [selectedSavedAssetId, setSelectedSavedAssetId] = useState('');
+  const [isLoadingSavedAssets, setIsLoadingSavedAssets] = useState(false);
+  const [savedAssetsError, setSavedAssetsError] = useState<string | null>(null);
+  const [isSaveAssetModalOpen, setIsSaveAssetModalOpen] = useState(false);
+  const [assetNameDraft, setAssetNameDraft] = useState('');
+  const [isSavingAsset, setIsSavingAsset] = useState(false);
+  const [saveAssetError, setSaveAssetError] = useState<string | null>(null);
 
   const currentCard = cards[currentIndex];
   const canvas = useEditorStore((state) => state.canvas);
@@ -587,6 +612,61 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [duplicateSelection, selectedIds]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadSavedAssets = async () => {
+      setIsLoadingSavedAssets(true);
+      setSavedAssetsError(null);
+
+      const { data, error } = await supabase
+        .from('set_assets')
+        .select('id,name,node_json,created_at')
+        .eq('set_id', setId)
+        .order('created_at', { ascending: false });
+
+      if (!isMounted) return;
+
+      if (error) {
+        setSavedAssets([]);
+        setSelectedSavedAssetId('');
+        setSavedAssetsError(error.message);
+        setIsLoadingSavedAssets(false);
+        return;
+      }
+
+      const nextAssets = (data ?? []).flatMap((asset) => {
+        const node = asset.node_json as CanvasNode | null;
+        if (!node || typeof node !== 'object' || !('type' in node)) {
+          return [] as SavedAssetRecord[];
+        }
+
+        return [
+          {
+            id: asset.id,
+            name: asset.name,
+            node_json: node,
+            created_at: asset.created_at
+          }
+        ];
+      });
+
+      setSavedAssets(nextAssets);
+      setSelectedSavedAssetId((current) =>
+        current && nextAssets.some((asset) => asset.id === current)
+          ? current
+          : nextAssets[0]?.id ?? ''
+      );
+      setIsLoadingSavedAssets(false);
+    };
+
+    void loadSavedAssets();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [setId, supabase]);
+
   const addCard = async () => {
     const orderIndex = cards.length;
     const normalizedDefault = normalizeCanvasSize(DEFAULT_PORTRAIT_CANVAS);
@@ -666,6 +746,92 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     setCards(nextCards);
     setCurrentIndex((index) => (nextCards.length === 0 ? 0 : Math.min(index, nextCards.length - 1)));
     setSelectedIds([]);
+  };
+
+  const selectedSingleNode = useMemo(() => {
+    if (selectedIds.length !== 1) return null;
+    return canvas.nodes.find((node) => node.id === selectedIds[0]) ?? null;
+  }, [canvas.nodes, selectedIds]);
+
+  const openSaveAssetModal = () => {
+    if (!selectedSingleNode) return;
+    setAssetNameDraft(selectedSingleNode.type === 'text' ? 'Text Asset' : `${selectedSingleNode.type} Asset`);
+    setSaveAssetError(null);
+    setIsSaveAssetModalOpen(true);
+  };
+
+  const closeSaveAssetModal = () => {
+    if (isSavingAsset) return;
+    setIsSaveAssetModalOpen(false);
+    setSaveAssetError(null);
+  };
+
+  const saveSelectedAsset = async () => {
+    if (!selectedSingleNode) {
+      setSaveAssetError('Select one element before saving an asset.');
+      return;
+    }
+
+    const trimmedName = assetNameDraft.trim();
+    if (!trimmedName) {
+      setSaveAssetError('Asset name is required.');
+      return;
+    }
+
+    setIsSavingAsset(true);
+    setSaveAssetError(null);
+
+    const { data, error } = await supabase
+      .from('set_assets')
+      .insert({
+        set_id: setId,
+        name: trimmedName,
+        node_json: selectedSingleNode
+      })
+      .select('id,name,node_json,created_at')
+      .single();
+
+    setIsSavingAsset(false);
+
+    if (error || !data) {
+      setSaveAssetError(error?.message ?? 'Unable to save asset.');
+      return;
+    }
+
+    const savedNode = data.node_json as CanvasNode;
+    const nextAsset: SavedAssetRecord = {
+      id: data.id,
+      name: data.name,
+      node_json: savedNode,
+      created_at: data.created_at
+    };
+
+    setSavedAssets((prev) => [nextAsset, ...prev]);
+    setSelectedSavedAssetId(nextAsset.id);
+    setIsSaveAssetModalOpen(false);
+    setAssetNameDraft('');
+    setSaveAssetError(null);
+  };
+
+  const addSelectedSavedAssetToCanvas = () => {
+    const selectedAsset = savedAssets.find((asset) => asset.id === selectedSavedAssetId);
+    if (!selectedAsset) return;
+
+    const insertionX = 48 + (canvas.nodes.length % 5) * 12;
+    const insertionY = 48 + (canvas.nodes.length % 5) * 12;
+    const nextNode = cloneCanvasNode(selectedAsset.node_json);
+    const nextNodeId = createNodeId('asset');
+
+    nextNode.id = nextNodeId;
+    nextNode.x = insertionX;
+    nextNode.y = insertionY;
+    nextNode.hidden = false;
+
+    setCanvas({
+      ...canvas,
+      nodes: [...canvas.nodes, nextNode]
+    });
+    setSelectedIds([nextNodeId]);
   };
 
   const updateSelectedTextNodes = (
@@ -1374,11 +1540,48 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
                 >
                   Duplicate Selected
                 </Button>
+                <Button
+                  variant="secondary"
+                  className="w-full"
+                  onClick={openSaveAssetModal}
+                  disabled={!selectedSingleNode}
+                >
+                  Save Selected as Asset
+                </Button>
                 <Button variant="danger" className="w-full" onClick={deleteSelection} disabled={selectedIds.length === 0}>
                   Delete Selected
                 </Button>
               </div>
             ) : null}
+            <div className="space-y-2 rounded-md border border-slate-200 p-2 dark:border-slate-700">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Saved assets</p>
+              <Select
+                value={selectedSavedAssetId}
+                onChange={(event) => setSelectedSavedAssetId(event.target.value)}
+                aria-label="Saved assets"
+                disabled={isLoadingSavedAssets || savedAssets.length === 0}
+              >
+                {savedAssets.length === 0 ? (
+                  <option value="">No saved assets</option>
+                ) : (
+                  savedAssets.map((asset) => (
+                    <option key={asset.id} value={asset.id}>
+                      {asset.name}
+                    </option>
+                  ))
+                )}
+              </Select>
+              <Button
+                variant="secondary"
+                className="w-full"
+                onClick={addSelectedSavedAssetToCanvas}
+                disabled={savedAssets.length === 0 || !selectedSavedAssetId}
+              >
+                Add Saved Asset
+              </Button>
+              {isLoadingSavedAssets ? <p className="text-xs text-slate-500">Loading assets...</p> : null}
+              {savedAssetsError ? <p className="text-xs text-rose-600 dark:text-rose-400">{savedAssetsError}</p> : null}
+            </div>
           </div>
         </aside>
         <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900 xl:px-5">
@@ -1540,6 +1743,45 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
             </div>
           </div>
         ) : null}
+      </Modal>
+      <Modal
+        open={isSaveAssetModalOpen}
+        title="Save Asset"
+        onClose={closeSaveAssetModal}
+      >
+        <div className="space-y-3">
+          <Input
+            value={assetNameDraft}
+            onChange={(event) => {
+              setAssetNameDraft(event.target.value);
+              if (saveAssetError) setSaveAssetError(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                void saveSelectedAsset();
+              }
+
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                closeSaveAssetModal();
+              }
+            }}
+            placeholder="Asset name"
+            aria-label="Asset name"
+            autoFocus
+            disabled={isSavingAsset}
+          />
+          {saveAssetError ? <p className="text-sm text-rose-600 dark:text-rose-400">{saveAssetError}</p> : null}
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={closeSaveAssetModal} disabled={isSavingAsset}>
+              Cancel
+            </Button>
+            <Button variant="primary" onClick={() => void saveSelectedAsset()} disabled={isSavingAsset}>
+              {isSavingAsset ? 'Saving...' : 'Save asset'}
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

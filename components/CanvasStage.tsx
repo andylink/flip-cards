@@ -832,9 +832,7 @@ export function CanvasStage({
           ) : null}
         </div>
       </div>
-      <p className="mt-2 text-xs text-slate-500">
-        TODO: Add transformer, grouping, crop, alignment guides, and marquee multi-select.
-      </p>
+     
     </div>
   );
 }
