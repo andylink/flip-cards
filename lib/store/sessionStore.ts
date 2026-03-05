@@ -9,7 +9,8 @@ type SessionStore = {
   revealEnabled: boolean;
   adFree: boolean;
   beginSession: (sessionId: string) => void;
-  registerAttempt: (correct: boolean, scoreDelta: number) => void;
+  registerEvaluation: (correct: boolean, scoreDelta: number) => void;
+  advanceProgress: () => void;
   setRevealEnabled: (enabled: boolean) => void;
   setAdFree: (adFree: boolean) => void;
   reset: () => void;
@@ -28,11 +29,14 @@ const defaultState = {
 export const useSessionStore = create<SessionStore>((set) => ({
   ...defaultState,
   beginSession: (sessionId) => set({ ...defaultState, sessionId }),
-  registerAttempt: (correct, scoreDelta) =>
+  registerEvaluation: (correct, scoreDelta) =>
     set((state) => ({
       score: state.score + scoreDelta,
       streak: correct ? state.streak + 1 : 0,
-      correctCount: state.correctCount + (correct ? 1 : 0),
+      correctCount: state.correctCount + (correct ? 1 : 0)
+    })),
+  advanceProgress: () =>
+    set((state) => ({
       totalAnswered: state.totalAnswered + 1
     })),
   setRevealEnabled: (enabled) => set({ revealEnabled: enabled }),

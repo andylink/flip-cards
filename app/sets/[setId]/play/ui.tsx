@@ -34,7 +34,8 @@ export function PlayClient({ setId, setTitle, initialCards, userId }: Props) {
   const streak = useSessionStore((state) => state.streak);
   const correctCount = useSessionStore((state) => state.correctCount);
   const totalAnswered = useSessionStore((state) => state.totalAnswered);
-  const registerAttempt = useSessionStore((state) => state.registerAttempt);
+  const registerEvaluation = useSessionStore((state) => state.registerEvaluation);
+  const advanceProgress = useSessionStore((state) => state.advanceProgress);
   const beginSession = useSessionStore((state) => state.beginSession);
   const revealEnabled = useSessionStore((state) => state.revealEnabled);
 
@@ -72,7 +73,8 @@ export function PlayClient({ setId, setTitle, initialCards, userId }: Props) {
       elapsed_ms: 0
     });
 
-    registerAttempt(pending.correct, scoreDelta);
+    registerEvaluation(pending.correct, scoreDelta);
+    advanceProgress();
     setFeedback(pending.correct ? 'Correct!' : 'Incorrect');
     setPending(null);
 
@@ -99,10 +101,12 @@ export function PlayClient({ setId, setTitle, initialCards, userId }: Props) {
     return <p>Card has no answer schema configured.</p>;
   }
 
+  const progress = Math.min(index + 1, cards.length);
+
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-semibold">Test View · {setTitle}</h1>
-      <ScoreHUD score={score} streak={streak} answered={totalAnswered} total={cards.length} />
+      <ScoreHUD score={score} streak={streak} answered={progress} total={cards.length} />
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,1fr)]">
         <section className="rounded-md border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
           <h2 className="mb-3 text-lg font-semibold">Card</h2>
