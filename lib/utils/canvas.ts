@@ -60,6 +60,7 @@ export function deserializeCanvas(raw: string): CanvasState {
   return normalizeCanvasState({
     width: parsed.width,
     height: parsed.height,
+    backgroundColor: parsed.backgroundColor,
     nodes: parsed.nodes ?? []
   });
 }

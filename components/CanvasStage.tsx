@@ -670,12 +670,20 @@ export function CanvasStage({
 
   return (
     <div className="space-y-3">
-      <div ref={viewportRef} className="w-full overflow-auto rounded-xl bg-slate-100 p-4">
-        <div className="relative mx-auto inline-block rounded-[22px] border-2 border-black bg-white p-2 shadow-[0_12px_30px_rgba(15,23,42,0.18)]">
+      <div
+        ref={viewportRef}
+        className="flex w-full items-start justify-center overflow-auto rounded-xl bg-slate-100 p-4"
+        style={{ minHeight: Math.max(displayHeight + 16, Math.round(viewportHeight * 0.72)) }}
+      >
+        <div
+          className="relative mx-auto inline-block rounded-[22px] p-2 shadow-[0_12px_30px_rgba(15,23,42,0.18)]"
+          style={{ backgroundColor: canvas.backgroundColor ?? '#ffffff' }}
+        >
         <Stage
           width={displayWidth}
           height={displayHeight}
           style={{
+            backgroundColor: canvas.backgroundColor ?? '#ffffff',
             cursor:
               activeTool === 'text'
                 ? 'text'
@@ -689,6 +697,14 @@ export function CanvasStage({
           onTouchStart={handleStagePointerDown}
         >
           <Layer ref={layerRef} scaleX={scale} scaleY={scale}>
+            <Rect
+              x={0}
+              y={0}
+              width={canvas.width}
+              height={canvas.height}
+              fill={canvas.backgroundColor ?? '#ffffff'}
+              listening={false}
+            />
             {canvas.nodes.map((node) =>
               drawNode(
                 node,

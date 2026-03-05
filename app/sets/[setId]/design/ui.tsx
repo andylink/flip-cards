@@ -34,16 +34,19 @@ type CanvasTool = 'select' | 'move' | 'text' | 'rect' | 'circle' | 'line';
 const MOBILE_SAFE_CANVAS_MAX_WIDTH = 720;
 const MOBILE_SAFE_CANVAS_MAX_HEIGHT = 1200;
 const DEFAULT_PORTRAIT_CANVAS = { width: 720, height: 1080 };
+const DEFAULT_CANVAS_BACKGROUND = '#ffffff';
 
 const emptyCanvas: CanvasState = {
   width: DEFAULT_PORTRAIT_CANVAS.width,
   height: DEFAULT_PORTRAIT_CANVAS.height,
+  backgroundColor: DEFAULT_CANVAS_BACKGROUND,
   nodes: []
 };
 
 const createCanvas = (width: number, height: number): CanvasState => ({
   width,
   height,
+  backgroundColor: DEFAULT_CANVAS_BACKGROUND,
   nodes: []
 });
 
@@ -690,6 +693,11 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     }
   };
 
+  const setCanvasBackgroundColor = (backgroundColor: string) => {
+    if (canvas.backgroundColor === backgroundColor) return;
+    setCanvas({ ...canvas, backgroundColor });
+  };
+
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -1000,6 +1008,33 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
               {` `}
               {Math.max(CANVAS_MIN_HEIGHT, CANVAS_MIN_WIDTH)}-{Math.min(canvasBounds.maxHeight, MOBILE_SAFE_CANVAS_MAX_HEIGHT)}px tall.
             </p>
+          </section>
+
+          <section className="space-y-2 rounded-md border border-slate-200 p-3 dark:border-slate-700">
+            <h3 className="text-sm font-semibold">Card Background</h3>
+            <div className="flex items-center gap-2">
+              <Input
+                type="color"
+                value={canvas.backgroundColor ?? DEFAULT_CANVAS_BACKGROUND}
+                onChange={(event) => setCanvasBackgroundColor(event.target.value)}
+                aria-label="Canvas background color"
+                className="h-10 w-16 cursor-pointer p-1"
+              />
+              <span className="text-xs text-slate-500">Applies to this card only.</span>
+            </div>
+            <div className="grid grid-cols-4 gap-2">
+              {COLOR_SWATCHES.map((color) => (
+                <button
+                  key={`canvas-bg-${color}`}
+                  type="button"
+                  aria-label={`Set canvas background ${color}`}
+                  title={color}
+                  onClick={() => setCanvasBackgroundColor(color)}
+                  className="h-7 w-full rounded border border-slate-300 transition hover:scale-[1.03] dark:border-slate-600"
+                  style={{ backgroundColor: color }}
+                />
+              ))}
+            </div>
           </section>
 
           <section className="space-y-2 rounded-md border border-slate-200 p-3 dark:border-slate-700">

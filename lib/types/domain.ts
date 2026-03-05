@@ -84,6 +84,7 @@ export type CanvasNode = TextNode | RectNode | CircleNode | LineNode | ImageNode
 export interface CanvasState {
   width: number;
   height: number;
+  backgroundColor?: string;
   nodes: CanvasNode[];
 }
 
