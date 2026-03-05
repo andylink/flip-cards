@@ -27,6 +27,29 @@ export function clampCanvasSize(size: CanvasSize, bounds: CanvasSizeBounds = {})
   };
 }
 
+export function clampPortraitCanvasSize(size: CanvasSize, bounds: CanvasSizeBounds = {}): CanvasSize {
+  const minWidth = bounds.minWidth ?? CANVAS_MIN_WIDTH;
+  const minHeight = Math.max(minWidth, bounds.minHeight ?? CANVAS_MIN_HEIGHT);
+  const maxWidth = Math.max(minWidth, bounds.maxWidth ?? Number.POSITIVE_INFINITY);
+  const maxHeight = Math.max(minHeight, bounds.maxHeight ?? Number.POSITIVE_INFINITY);
+
+  let width = Math.min(maxWidth, Math.max(minWidth, Math.round(size.width)));
+  let height = Math.min(maxHeight, Math.max(minHeight, Math.round(size.height)));
+
+  if (height < width) {
+    height = Math.min(maxHeight, width);
+  }
+
+  if (height < width) {
+    width = Math.max(minWidth, Math.min(maxWidth, height));
+  }
+
+  return {
+    width,
+    height
+  };
+}
+
 export function serializeCanvas(canvas: CanvasState): string {
   return JSON.stringify(canvas);
 }

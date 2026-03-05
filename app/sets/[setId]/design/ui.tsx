@@ -7,11 +7,10 @@ import { AnswerType, CanvasState, CardRecord } from '@/lib/types/domain';
 import { useEditorStore } from '@/lib/store/editorStore';
 import { CardNavigator } from '@/components/CardNavigator';
 import { ClozeEditor, DropdownEditor, FreeFormEditor, MCQEditor } from '@/components/AnswerBuilder';
-import { Input } from '@/components/Common/Input';
 import { Select } from '@/components/Common/Select';
 import { Button } from '@/components/Common/Button';
 import { clozeSchema, dropdownSchema, freeFormSchema, mcqSchema } from '@/lib/utils/answerEvaluation';
-import { CANVAS_MIN_HEIGHT, CANVAS_MIN_WIDTH, clampCanvasSize } from '@/lib/utils/canvas';
+import { CANVAS_MIN_HEIGHT, CANVAS_MIN_WIDTH, clampPortraitCanvasSize } from '@/lib/utils/canvas';
 
 const CanvasStage = dynamic(
   () => import('@/components/CanvasStage').then((module) => module.CanvasStage),
@@ -30,9 +29,13 @@ type Props = {
 
 type CanvasTool = 'select' | 'move' | 'text';
 
+const MOBILE_SAFE_CANVAS_MAX_WIDTH = 720;
+const MOBILE_SAFE_CANVAS_MAX_HEIGHT = 1200;
+const DEFAULT_PORTRAIT_CANVAS = { width: 720, height: 1080 };
+
 const emptyCanvas: CanvasState = {
-  width: 1024,
-  height: 576,
+  width: DEFAULT_PORTRAIT_CANVAS.width,
+  height: DEFAULT_PORTRAIT_CANVAS.height,
   nodes: []
 };
 
@@ -215,9 +218,7 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
   const [cards, setCards] = useState<Props['initialCards']>(initialCards);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [activeTool, setActiveTool] = useState<CanvasTool>('select');
-  const [canvasSize, setCanvasSize] = useState({ width: emptyCanvas.width, height: emptyCanvas.height });
   const [canvasBounds, setCanvasBounds] = useState({ maxWidth: DEFAULT_CANVAS_MAX_WIDTH, maxHeight: DEFAULT_CANVAS_MAX_HEIGHT });
-  const [isApplyingCanvasSize, setIsApplyingCanvasSize] = useState(false);
   const [textSettings, setTextSettings] = useState({ fontFamily: 'Arial', fontSize: 32, fontWeight: '400', color: '#0f172a' });
   const [answerType, setAnswerType] = useState<AnswerType>('freeform');
   const [answerDraft, setAnswerDraft] = useState<AnswerDraft>(createDefaultDraft());
@@ -245,25 +246,12 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
   };
 
   const normalizeCanvasSize = (size: { width: number; height: number }) =>
-    clampCanvasSize(size, {
+    clampPortraitCanvasSize(size, {
       minWidth: CANVAS_MIN_WIDTH,
-      minHeight: CANVAS_MIN_HEIGHT,
-      maxWidth: canvasBounds.maxWidth,
-      maxHeight: canvasBounds.maxHeight
+      minHeight: Math.max(CANVAS_MIN_HEIGHT, CANVAS_MIN_WIDTH),
+      maxWidth: Math.min(canvasBounds.maxWidth, MOBILE_SAFE_CANVAS_MAX_WIDTH),
+      maxHeight: Math.min(canvasBounds.maxHeight, MOBILE_SAFE_CANVAS_MAX_HEIGHT)
     });
-
-  const updateCanvasSize = (nextSize: { width: number; height: number }) => {
-    const normalized = normalizeCanvasSize(nextSize);
-    setCanvasSize(normalized);
-
-    if (canvas.width === normalized.width && canvas.height === normalized.height) return;
-
-    setCanvas({
-      ...canvas,
-      width: normalized.width,
-      height: normalized.height
-    });
-  };
 
   useEffect(() => {
     const updateBounds = () => setCanvasBounds(getViewportCanvasBounds());
@@ -273,9 +261,17 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
   }, []);
 
   useEffect(() => {
+    const normalizedEmpty = normalizeCanvasSize(DEFAULT_PORTRAIT_CANVAS);
+
     if (!currentCard) {
-      setCanvas(emptyCanvas, false);
-      setCanvasSize({ width: emptyCanvas.width, height: emptyCanvas.height });
+      setCanvas(
+        {
+          ...emptyCanvas,
+          width: normalizedEmpty.width,
+          height: normalizedEmpty.height
+        },
+        false
+      );
       return;
     }
 
@@ -292,7 +288,6 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
       },
       false
     );
-    setCanvasSize(normalized);
   }, [canvasBounds.maxHeight, canvasBounds.maxWidth, currentCard, setCanvas]);
 
   useEffect(() => {
@@ -373,7 +368,8 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
 
   const addCard = async () => {
     const orderIndex = cards.length;
-    const baseCanvas = createCanvas(canvasSize.width, canvasSize.height);
+    const normalizedDefault = normalizeCanvasSize(DEFAULT_PORTRAIT_CANVAS);
+    const baseCanvas = createCanvas(normalizedDefault.width, normalizedDefault.height);
     const { data } = await supabase
       .from('cards')
       .insert({ set_id: setId, title: `Card ${orderIndex + 1}`, canvas_json: baseCanvas, order_index: orderIndex })
@@ -400,47 +396,6 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     if (hasChanges) {
       setCanvas({ ...canvas, nodes: nextNodes });
     }
-  };
-
-  const parseNumber = (value: string, fallback: number) => {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : fallback;
-  };
-
-  const applyCanvasSizeToSet = async () => {
-    if (cards.length === 0 || isApplyingCanvasSize) return;
-
-    const { width, height } = normalizeCanvasSize(canvasSize);
-    setCanvasSize({ width, height });
-    setIsApplyingCanvasSize(true);
-
-    const nextCards = cards.map((card) => ({
-      ...card,
-      canvas_json: {
-        ...card.canvas_json,
-        width,
-        height
-      }
-    }));
-
-    setCards(nextCards);
-    setCanvas({
-      ...canvas,
-      width,
-      height
-    });
-
-    await Promise.all(
-      nextCards.map((card) =>
-        supabase
-          .from('cards')
-          .update({ canvas_json: card.canvas_json })
-          .eq('id', card.id)
-          .eq('set_id', setId)
-      )
-    );
-
-    setIsApplyingCanvasSize(false);
   };
 
   return (
@@ -524,7 +479,7 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
             ) : null}
           </div>
         </aside>
-        <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900 xl:px-5">
           <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
             Active tool: <span className="font-semibold uppercase">{activeTool}</span>
           </div>
@@ -538,62 +493,14 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
           />
         </section>
         <aside className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <section className="space-y-2 rounded-md border border-slate-200 p-3 dark:border-slate-700">
-            <h3 className="text-sm font-semibold">Canvas Size (Set Level)</h3>
-            <div className="grid grid-cols-3 gap-2">
-              <Button
-                variant="secondary"
-                onClick={() => updateCanvasSize({ width: 1024, height: 576 })}
-              >
-                16:9
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => updateCanvasSize({ width: 900, height: 900 })}
-              >
-                1:1
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => updateCanvasSize({ width: 1080, height: 1350 })}
-              >
-                4:5
-              </Button>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <Input
-                type="number"
-                min={CANVAS_MIN_WIDTH}
-                max={canvasBounds.maxWidth}
-                value={canvasSize.width}
-                onChange={(event) =>
-                  updateCanvasSize({
-                    width: parseNumber(event.target.value, canvasSize.width),
-                    height: canvasSize.height
-                  })
-                }
-                aria-label="Canvas width"
-              />
-              <Input
-                type="number"
-                min={CANVAS_MIN_HEIGHT}
-                max={canvasBounds.maxHeight}
-                value={canvasSize.height}
-                onChange={(event) =>
-                  updateCanvasSize({
-                    width: canvasSize.width,
-                    height: parseNumber(event.target.value, canvasSize.height)
-                  })
-                }
-                aria-label="Canvas height"
-              />
-            </div>
-            <p className="text-xs text-slate-500">
-              Limits: {CANVAS_MIN_WIDTH}-{canvasBounds.maxWidth}px wide, {CANVAS_MIN_HEIGHT}-{canvasBounds.maxHeight}px tall (viewport-aware).
+          <section className="space-y-2 rounded-md border border-slate-200 p-3 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Canvas Sizing</h3>
+            <p>The canvas is now auto-sized for portrait layouts and scaled responsively to the current viewport.</p>
+            <p>
+              Limits: {CANVAS_MIN_WIDTH}-{Math.min(canvasBounds.maxWidth, MOBILE_SAFE_CANVAS_MAX_WIDTH)}px wide and
+              {` `}
+              {Math.max(CANVAS_MIN_HEIGHT, CANVAS_MIN_WIDTH)}-{Math.min(canvasBounds.maxHeight, MOBILE_SAFE_CANVAS_MAX_HEIGHT)}px tall.
             </p>
-            <Button onClick={applyCanvasSizeToSet} disabled={isApplyingCanvasSize}>
-              {isApplyingCanvasSize ? 'Applying...' : 'Apply to all cards'}
-            </Button>
           </section>
 
           <section className="space-y-2 rounded-md border border-slate-200 p-3 dark:border-slate-700">

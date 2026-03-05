@@ -151,9 +151,58 @@ export function CanvasStage({
   onSelectIds,
   onCanvasChange
 }: Props) {
+  const cardChromePadding = 16; // p-2 around Stage inside card frame
+  const viewportPadding = 32; // p-4 around card frame in viewport area
+
   const [textEditor, setTextEditor] = useState<TextEditorState | null>(null);
   const textEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const suppressNextBlurRef = useRef(false);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const [viewportWidth, setViewportWidth] = useState<number>(canvas.width + viewportPadding + cardChromePadding);
+  const [viewportHeight, setViewportHeight] = useState<number>(900);
+
+  useEffect(() => {
+    if (!viewportRef.current) return;
+    const updateFromElement = () => {
+      if (!viewportRef.current) return;
+      const nextWidth = viewportRef.current.clientWidth;
+      if (nextWidth > 0) {
+        setViewportWidth(nextWidth);
+      }
+    };
+
+    if (typeof ResizeObserver === 'undefined') {
+      updateFromElement();
+      window.addEventListener('resize', updateFromElement);
+      return () => window.removeEventListener('resize', updateFromElement);
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const nextWidth = entry.contentRect.width;
+      if (nextWidth > 0) {
+        setViewportWidth(nextWidth);
+      }
+    });
+    observer.observe(viewportRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const updateHeight = () => setViewportHeight(window.innerHeight);
+    updateHeight();
+    window.addEventListener('resize', updateHeight);
+    return () => window.removeEventListener('resize', updateHeight);
+  }, []);
+
+  const effectiveViewportWidth = viewportWidth > 0 ? viewportWidth : canvas.width + viewportPadding + cardChromePadding;
+  const availableWidth = Math.max(1, effectiveViewportWidth - viewportPadding - cardChromePadding);
+  const availableHeight = Math.max(1, viewportHeight * 0.72 - viewportPadding - cardChromePadding);
+  const scale = Math.min(1, availableWidth / canvas.width, availableHeight / canvas.height);
+  const displayWidth = Math.max(1, Math.round(canvas.width * scale));
+  const displayHeight = Math.max(1, Math.round(canvas.height * scale));
 
   const handleStagePointerDown = (event: KonvaEventObject<MouseEvent | TouchEvent>) => {
     const stage = event.target.getStage();
@@ -183,8 +232,8 @@ export function CanvasStage({
       const textNode: CanvasNode = {
         id: textId,
         type: 'text',
-        x: snapToGrid(pointer.x, GRID),
-        y: snapToGrid(pointer.y, GRID),
+        x: snapToGrid(pointer.x / scale, GRID),
+        y: snapToGrid(pointer.y / scale, GRID),
         text: '',
         fontFamily: textDefaults.fontFamily,
         fontSize: textDefaults.fontSize,
@@ -306,16 +355,17 @@ export function CanvasStage({
   }, [canvas, selectedIds, onCanvasChange, textEditor]);
 
   return (
-    <div className="overflow-auto rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
-      <div className="relative inline-block">
+    <div className="space-y-3">
+      <div ref={viewportRef} className="w-full overflow-auto rounded-xl bg-slate-100 p-4">
+        <div className="relative mx-auto inline-block rounded-[22px] border-2 border-black bg-white p-2 shadow-[0_12px_30px_rgba(15,23,42,0.18)]">
         <Stage
-          width={canvas.width}
-          height={canvas.height}
+          width={displayWidth}
+          height={displayHeight}
           style={{ cursor: activeTool === 'text' ? 'text' : activeTool === 'move' ? 'grab' : 'default' }}
           onMouseDown={handleStagePointerDown}
           onTouchStart={handleStagePointerDown}
         >
-          <Layer>
+          <Layer scaleX={scale} scaleY={scale}>
             {canvas.nodes.map((node) =>
               drawNode(
                 node,
@@ -336,52 +386,53 @@ export function CanvasStage({
             )}
           </Layer>
         </Stage>
-        {textEditor ? (
-          <textarea
-            ref={textEditorRef}
-            value={textEditor.value}
-            onChange={(event) =>
-              setTextEditor((current) => (current ? { ...current, value: event.target.value } : current))
-            }
-            onBlur={() => {
-              if (suppressNextBlurRef.current) {
-                suppressNextBlurRef.current = false;
-                requestAnimationFrame(() => {
-                  textEditorRef.current?.focus();
-                });
-                return;
+          {textEditor ? (
+            <textarea
+              ref={textEditorRef}
+              value={textEditor.value}
+              onChange={(event) =>
+                setTextEditor((current) => (current ? { ...current, value: event.target.value } : current))
               }
-              commitTextEdit(true);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                event.preventDefault();
-                commitTextEdit(textEditor.isNew);
-              }
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
+              onBlur={() => {
+                if (suppressNextBlurRef.current) {
+                  suppressNextBlurRef.current = false;
+                  requestAnimationFrame(() => {
+                    textEditorRef.current?.focus();
+                  });
+                  return;
+                }
                 commitTextEdit(true);
-              }
-            }}
-            className="absolute resize-none overflow-hidden border border-blue-300 bg-white/95 px-1 py-0.5 text-slate-900 shadow-sm focus:outline-none"
-            style={{
-              left: textEditor.x,
-              top: textEditor.y,
-              minWidth: 120,
-              zIndex: 20,
-              fontFamily: textEditor.fontFamily,
-              fontSize: textEditor.fontSize,
-              lineHeight: 1.2,
-              fontWeight:
-                textEditor.fontWeight === '700'
-                  ? 700
-                  : textEditor.fontWeight === '600'
-                  ? 600
-                  : 400,
-              color: textEditor.color
-            }}
-          />
-        ) : null}
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  commitTextEdit(textEditor.isNew);
+                }
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  commitTextEdit(true);
+                }
+              }}
+              className="absolute resize-none overflow-hidden border border-blue-300 bg-white/95 px-1 py-0.5 text-slate-900 shadow-sm focus:outline-none"
+              style={{
+                left: textEditor.x * scale,
+                top: textEditor.y * scale,
+                minWidth: Math.max(72, 120 * scale),
+                zIndex: 20,
+                fontFamily: textEditor.fontFamily,
+                fontSize: Math.max(12, textEditor.fontSize * scale),
+                lineHeight: 1.2,
+                fontWeight:
+                  textEditor.fontWeight === '700'
+                    ? 700
+                    : textEditor.fontWeight === '600'
+                    ? 600
+                    : 400,
+                color: textEditor.color
+              }}
+            />
+          ) : null}
+        </div>
       </div>
       <p className="mt-2 text-xs text-slate-500">
         TODO: Add transformer, grouping, crop, alignment guides, and marquee multi-select.

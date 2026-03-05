@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampCanvasSize, snapToGrid, serializeCanvas, deserializeCanvas } from '@/lib/utils/canvas';
+import { clampCanvasSize, clampPortraitCanvasSize, snapToGrid, serializeCanvas, deserializeCanvas } from '@/lib/utils/canvas';
 import { CanvasState } from '@/lib/types/domain';
 
 describe('canvas utils', () => {
@@ -28,5 +28,23 @@ describe('canvas utils', () => {
 
   it('rounds canvas dimensions to integers', () => {
     expect(clampCanvasSize({ width: 800.6, height: 600.2 })).toEqual({ width: 801, height: 600 });
+  });
+
+  it('enforces portrait dimensions when clamping portrait canvas size', () => {
+    expect(
+      clampPortraitCanvasSize(
+        { width: 900, height: 600 },
+        { minWidth: 320, minHeight: 320, maxWidth: 720, maxHeight: 1200 }
+      )
+    ).toEqual({ width: 720, height: 720 });
+  });
+
+  it('applies provided bounds while preserving portrait orientation', () => {
+    expect(
+      clampPortraitCanvasSize(
+        { width: 300.2, height: 500.9 },
+        { minWidth: 320, minHeight: 320, maxWidth: 720, maxHeight: 1200 }
+      )
+    ).toEqual({ width: 320, height: 501 });
   });
 });
