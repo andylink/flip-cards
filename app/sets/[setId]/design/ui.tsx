@@ -240,6 +240,8 @@ type ShapeSettings = {
   strokeOpacity: number;
 };
 
+type TextAlignment = 'left' | 'center' | 'right';
+
 type NodeBounds = {
   x: number;
   y: number;
@@ -580,6 +582,8 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     fontFamily: 'Arial',
     fontSize: 32,
     fontWeight: '400',
+    fontStyle: 'normal' as 'normal' | 'italic',
+    textAlign: 'left' as TextAlignment,
     color: CanvasAppearanceDefaults.textFill.color
   });
   const [shapeSettings, setShapeSettings] = useState<ShapeSettings>({
@@ -1212,7 +1216,9 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
   };
 
   const updateSelectedTextNodes = (
-    updates: Partial<Pick<Extract<CanvasNode, { type: 'text' }>, 'fontFamily' | 'fontSize' | 'fontWeight' | 'fill'>>
+    updates: Partial<
+      Pick<Extract<CanvasNode, { type: 'text' }>, 'fontFamily' | 'fontSize' | 'fontWeight' | 'fontStyle' | 'textAlign' | 'fill'>
+    >
   ) => {
     const selected = new Set(selectedIds);
     if (selected.size === 0) return;
@@ -1333,6 +1339,23 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     applyAppearanceToSelectedNodes({ fill: { color } });
   };
 
+  const handleBoldToggle = () => {
+    const nextWeight = textSettings.fontWeight === '400' ? '700' : '400';
+    setTextSettings((previous) => ({ ...previous, fontWeight: nextWeight }));
+    updateSelectedTextNodes({ fontWeight: nextWeight });
+  };
+
+  const handleItalicToggle = () => {
+    const nextStyle = textSettings.fontStyle === 'italic' ? 'normal' : 'italic';
+    setTextSettings((previous) => ({ ...previous, fontStyle: nextStyle }));
+    updateSelectedTextNodes({ fontStyle: nextStyle });
+  };
+
+  const handleTextAlignChange = (textAlign: TextAlignment) => {
+    setTextSettings((previous) => ({ ...previous, textAlign }));
+    updateSelectedTextNodes({ textAlign });
+  };
+
   const handleStrokeColorChange = (color: string) => {
     setShapeSettings((previous) => ({ ...previous, strokeColor: color }));
     applyAppearanceToSelectedNodes({ stroke: { color } });
@@ -1399,6 +1422,20 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     const candidate = canvas.nodes.find((node) => node.id === selectedIds[0]);
     return candidate?.type === 'text' ? candidate : null;
   }, [canvas.nodes, selectedIds]);
+
+  useEffect(() => {
+    if (!selectedTextNode) return;
+
+    setTextSettings((previous) => ({
+      ...previous,
+      fontFamily: selectedTextNode.fontFamily ?? previous.fontFamily,
+      fontSize: selectedTextNode.fontSize ?? previous.fontSize,
+      fontWeight: selectedTextNode.fontWeight ?? previous.fontWeight,
+      fontStyle: selectedTextNode.fontStyle ?? previous.fontStyle,
+      textAlign: selectedTextNode.textAlign ?? previous.textAlign,
+      color: selectedTextNode.fill?.color ?? previous.color
+    }));
+  }, [selectedTextNode]);
 
   const clozeSourceNode = useMemo(() => {
     if (!answerDraft.cloze.sourceNodeId) return null;
@@ -1822,6 +1859,55 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
                     </option>
                   ))}
                 </Select>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant={textSettings.fontWeight === '400' ? 'secondary' : 'primary'}
+                    className="h-9"
+                    onClick={handleBoldToggle}
+                    aria-label="Toggle bold"
+                  >
+                    <span className="text-base font-bold">B</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={textSettings.fontStyle === 'italic' ? 'primary' : 'secondary'}
+                    className="h-9"
+                    onClick={handleItalicToggle}
+                    aria-label="Toggle italic"
+                  >
+                    <span className="text-base italic">I</span>
+                  </Button>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <Button
+                    type="button"
+                    variant={textSettings.textAlign === 'left' ? 'primary' : 'secondary'}
+                    className="h-9"
+                    onClick={() => handleTextAlignChange('left')}
+                    aria-label="Align left"
+                  >
+                    Left
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={textSettings.textAlign === 'center' ? 'primary' : 'secondary'}
+                    className="h-9"
+                    onClick={() => handleTextAlignChange('center')}
+                    aria-label="Align center"
+                  >
+                    Center
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={textSettings.textAlign === 'right' ? 'primary' : 'secondary'}
+                    className="h-9"
+                    onClick={() => handleTextAlignChange('right')}
+                    aria-label="Align right"
+                  >
+                    Right
+                  </Button>
+                </div>
               </div>
             ) : null}
             {activeTool === 'icon' ? (

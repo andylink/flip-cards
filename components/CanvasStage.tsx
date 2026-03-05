@@ -17,6 +17,8 @@ type TextDefaults = {
   fontFamily: string;
   fontSize: number;
   fontWeight: string;
+  fontStyle: 'normal' | 'italic';
+  textAlign: 'left' | 'center' | 'right';
   color: string;
 };
 
@@ -38,6 +40,8 @@ type TextEditorState = {
   fontFamily: string;
   fontSize: number;
   fontWeight: string;
+  fontStyle: 'normal' | 'italic';
+  textAlign: 'left' | 'center' | 'right';
   color: string;
   isNew: boolean;
 };
@@ -60,6 +64,14 @@ type NodeBounds = {
 };
 
 const TEXT_RIGHT_PADDING = 16;
+
+function toKonvaTextStyle(fontWeight: string, fontStyle: 'normal' | 'italic'): 'normal' | 'bold' | 'italic' | 'bold italic' {
+  const isBold = fontWeight !== '400';
+  if (isBold && fontStyle === 'italic') return 'bold italic';
+  if (isBold) return 'bold';
+  if (fontStyle === 'italic') return 'italic';
+  return 'normal';
+}
 
 function getTextFlowWidth(x: number, canvasWidth: number, fontSize: number): number {
   const minimumWidth = Math.max(96, Math.round(fontSize * 4));
@@ -229,9 +241,10 @@ function drawNode(
         text={node.text ?? ''}
         width={flowWidth}
         wrap="word"
+        align={node.textAlign ?? 'left'}
         fontFamily={node.fontFamily ?? 'Arial'}
         fontSize={node.fontSize ?? 24}
-        fontStyle={node.fontWeight === '700' ? 'bold' : 'normal'}
+        fontStyle={toKonvaTextStyle(node.fontWeight ?? '400', node.fontStyle ?? 'normal')}
         {...fillProps}
         onClick={(event: any) => {
           // prevent bubbling to Stage so edit isn’t interrupted by selection/background handlers
@@ -474,6 +487,8 @@ export function CanvasStage({
         fontFamily: textDefaults.fontFamily,
         fontSize: textDefaults.fontSize,
         fontWeight: textDefaults.fontWeight,
+        fontStyle: textDefaults.fontStyle,
+        textAlign: textDefaults.textAlign,
         fill: {
           enabled: true,
           color: textDefaults.color,
@@ -573,6 +588,8 @@ export function CanvasStage({
       fontFamily: node.fontFamily ?? textDefaults.fontFamily,
       fontSize: node.fontSize ?? textDefaults.fontSize,
       fontWeight: node.fontWeight ?? textDefaults.fontWeight,
+      fontStyle: node.fontStyle ?? textDefaults.fontStyle,
+      textAlign: node.textAlign ?? textDefaults.textAlign,
       color: node.fill?.color ?? textDefaults.color,
       isNew
     });
@@ -607,6 +624,8 @@ export function CanvasStage({
               fontFamily: textEditor.fontFamily,
               fontSize: textEditor.fontSize,
               fontWeight: textEditor.fontWeight,
+              fontStyle: textEditor.fontStyle,
+              textAlign: textEditor.textAlign,
               fill: {
                 enabled: true,
                 color: textEditor.color,
@@ -632,6 +651,40 @@ export function CanvasStage({
     input.style.height = 'auto';
     input.style.height = `${Math.max(input.scrollHeight, (textEditor?.fontSize ?? 24) + 10)}px`;
   }, [textEditor?.value, textEditor?.fontSize]);
+
+  useEffect(() => {
+    if (!textEditor) return;
+
+    const activeNode = canvas.nodes.find((node) => node.id === textEditor.nodeId);
+    if (!activeNode || activeNode.type !== 'text') return;
+
+    setTextEditor((current) => {
+      if (!current || current.nodeId !== activeNode.id) return current;
+
+      const nextEditor = {
+        ...current,
+        fontFamily: activeNode.fontFamily ?? textDefaults.fontFamily,
+        fontSize: activeNode.fontSize ?? textDefaults.fontSize,
+        fontWeight: activeNode.fontWeight ?? textDefaults.fontWeight,
+        fontStyle: activeNode.fontStyle ?? textDefaults.fontStyle,
+        textAlign: activeNode.textAlign ?? textDefaults.textAlign,
+        color: activeNode.fill?.color ?? textDefaults.color
+      };
+
+      if (
+        nextEditor.fontFamily === current.fontFamily &&
+        nextEditor.fontSize === current.fontSize &&
+        nextEditor.fontWeight === current.fontWeight &&
+        nextEditor.fontStyle === current.fontStyle &&
+        nextEditor.textAlign === current.textAlign &&
+        nextEditor.color === current.color
+      ) {
+        return current;
+      }
+
+      return nextEditor;
+    });
+  }, [canvas.nodes, textDefaults, textEditor]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -882,6 +935,8 @@ export function CanvasStage({
                     : textEditor.fontWeight === '600'
                     ? 600
                     : 400,
+                fontStyle: textEditor.fontStyle,
+                textAlign: textEditor.textAlign,
                 color: textEditor.color
               }}
             />

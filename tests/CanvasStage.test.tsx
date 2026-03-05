@@ -59,7 +59,14 @@ describe('CanvasStage', () => {
         }}
         selectedIds={['1']}
         activeTool="select"
-        textDefaults={{ fontFamily: 'Arial', fontSize: 24, fontWeight: '400', color: '#0f172a' }}
+        textDefaults={{
+          fontFamily: 'Arial',
+          fontSize: 24,
+          fontWeight: '400',
+          fontStyle: 'normal',
+          textAlign: 'left',
+          color: '#0f172a'
+        }}
         shapeDefaults={{
           fillEnabled: true,
           fillColor: '#dbeafe',
@@ -92,7 +99,14 @@ describe('CanvasStage', () => {
         }}
         selectedIds={[]}
         activeTool="text"
-        textDefaults={{ fontFamily: 'Arial', fontSize: 24, fontWeight: '400', color: '#0f172a' }}
+        textDefaults={{
+          fontFamily: 'Arial',
+          fontSize: 24,
+          fontWeight: '400',
+          fontStyle: 'normal',
+          textAlign: 'left',
+          color: '#0f172a'
+        }}
         shapeDefaults={{
           fillEnabled: true,
           fillColor: '#dbeafe',
@@ -140,7 +154,14 @@ describe('CanvasStage', () => {
         }}
         selectedIds={['1']}
         activeTool="select"
-        textDefaults={{ fontFamily: 'Arial', fontSize: 24, fontWeight: '400', color: '#0f172a' }}
+        textDefaults={{
+          fontFamily: 'Arial',
+          fontSize: 24,
+          fontWeight: '400',
+          fontStyle: 'normal',
+          textAlign: 'left',
+          color: '#0f172a'
+        }}
         shapeDefaults={{
           fillEnabled: true,
           fillColor: '#dbeafe',

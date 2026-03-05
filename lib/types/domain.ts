@@ -31,6 +31,8 @@ export type TextNode = CanvasNodeBase & {
   fontFamily?: string;
   fontSize?: number;
   fontWeight?: string;
+  fontStyle?: 'normal' | 'italic';
+  textAlign?: 'left' | 'center' | 'right';
   fill?: FillStyle;
   // Compatibility with older serialized canvases.
   legacyFill?: string;
