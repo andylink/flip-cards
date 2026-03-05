@@ -4,7 +4,7 @@ import Link from 'next/link';
 
 export const metadata: Metadata = {
   title: 'FlipForge',
-  description: 'Design and play custom learning flip-cards.'
+  description: 'Design and test custom learning flip-cards.'
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -1,22 +1,18 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { PromptPanel, AnswerWidget, ScoreHUD, SessionSummary } from '@/components/Play';
+import { AnswerWidget, ScoreHUD, SessionSummary, TestCardPreview } from '@/components/Play';
 import { useSessionStore } from '@/lib/store/sessionStore';
 import { evaluateAnswer } from '@/lib/utils/answerEvaluation';
 import { createClient } from '@/lib/supabase/client';
-import { AdsSlot } from '@/components/AdsSlot';
 import { Button } from '@/components/Common/Button';
+import { AnswerType, CanvasState } from '@/lib/types/domain';
 
 type CardWithAnswer = {
   id: string;
   title: string;
-  canvas_json: {
-    width: number;
-    height: number;
-    nodes: Array<{ id: string; type: string; text?: string }>;
-  };
-  answers: { type: 'freeform' | 'mcq' | 'cloze' | 'dropdown' | 'multiselect'; schema_json: unknown }[];
+  canvas_json: CanvasState;
+  answers: { type: AnswerType; schema_json: unknown }[];
 };
 
 type Props = {
@@ -114,34 +110,42 @@ export function PlayClient({ setId, setTitle, initialCards, userId }: Props) {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold">Play View · {setTitle}</h1>
+      <h1 className="text-2xl font-semibold">Test View · {setTitle}</h1>
       <ScoreHUD score={score} streak={streak} answered={totalAnswered} total={cards.length} />
-      <PromptPanel canvas={current.canvas_json} />
-      <AnswerWidget
-        answerType={answer.type}
-        schemaJson={answer.schema_json}
-        onSubmit={(response) => {
-          const correct = evaluateAnswer(answer.type, answer.schema_json, response);
-          setPending({ cardId: current.id, response, correct });
-          setFeedback(correct ? 'Correct!' : 'Incorrect');
-        }}
-      />
-      {revealEnabled ? <p className="text-sm text-slate-600 dark:text-slate-300">{feedback}</p> : null}
-      <div className="flex flex-wrap gap-2">
-        <Button onClick={() => completeAttempt('again')} variant="secondary" disabled={!pending}>
-          Again
-        </Button>
-        <Button onClick={() => completeAttempt('hard')} variant="secondary" disabled={!pending}>
-          Hard
-        </Button>
-        <Button onClick={() => completeAttempt('good')} disabled={!pending}>
-          Good
-        </Button>
-        <Button onClick={() => completeAttempt('easy')} disabled={!pending}>
-          Easy
-        </Button>
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,1fr)]">
+        <section className="rounded-md border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+          <h2 className="mb-3 text-lg font-semibold">Card</h2>
+          <TestCardPreview canvas={current.canvas_json} />
+        </section>
+
+        <section className="space-y-4 rounded-md border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+          <h2 className="text-lg font-semibold">Answer</h2>
+          <AnswerWidget
+            answerType={answer.type}
+            schemaJson={answer.schema_json}
+            onSubmit={(response) => {
+              const correct = evaluateAnswer(answer.type, answer.schema_json, response);
+              setPending({ cardId: current.id, response, correct });
+              setFeedback(correct ? 'Correct!' : 'Incorrect');
+            }}
+          />
+          {revealEnabled ? <p className="text-sm text-slate-600 dark:text-slate-300">{feedback}</p> : null}
+          <div className="flex flex-wrap gap-2 border-t border-slate-200 pt-4 dark:border-slate-700">
+            <Button onClick={() => completeAttempt('again')} variant="secondary" disabled={!pending}>
+              Again
+            </Button>
+            <Button onClick={() => completeAttempt('hard')} variant="secondary" disabled={!pending}>
+              Hard
+            </Button>
+            <Button onClick={() => completeAttempt('good')} disabled={!pending}>
+              Good
+            </Button>
+            <Button onClick={() => completeAttempt('easy')} disabled={!pending}>
+              Easy
+            </Button>
+          </div>
+        </section>
       </div>
-      <AdsSlot />
     </div>
   );
 }

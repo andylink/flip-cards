@@ -17,7 +17,7 @@ export function SessionSummary({ score, totalAnswered, correctCount, onRestart }
       <h2 className="text-lg font-semibold">Session Complete</h2>
       <p>Score: {score}</p>
       <p>Accuracy: {accuracy}%</p>
-      <Button onClick={onRestart}>Play Again</Button>
+      <Button onClick={onRestart}>Test Again</Button>
     </section>
   );
 }

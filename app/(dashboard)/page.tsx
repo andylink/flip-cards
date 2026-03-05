@@ -39,7 +39,7 @@ export default async function DashboardPage() {
                 Design
               </Link>
               <Link className="focus-ring rounded bg-slate-200 px-2 py-1 dark:bg-slate-700" href={`/sets/${set.id}/play`}>
-                Play
+                Test
               </Link>
               <HoldToDeleteSetButton setId={set.id} />
             </div>

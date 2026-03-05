@@ -359,6 +359,11 @@ const toPersistedSchema = (type: AnswerType, draft: AnswerDraft): unknown => {
 export function DesignClient({ setId, setTitle, initialCards }: Props) {
   const supabase = useMemo(() => createClient(), []);
   const [cards, setCards] = useState<Props['initialCards']>(initialCards);
+  const [editableSetTitle, setEditableSetTitle] = useState(setTitle);
+  const [setTitleDraft, setSetTitleDraft] = useState(setTitle);
+  const [isEditingSetTitle, setIsEditingSetTitle] = useState(false);
+  const [isSavingSetTitle, setIsSavingSetTitle] = useState(false);
+  const [setTitleError, setSetTitleError] = useState<string | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [activeTool, setActiveTool] = useState<CanvasTool>('select');
   const [canvasBounds, setCanvasBounds] = useState({ maxWidth: DEFAULT_CANVAS_MAX_WIDTH, maxHeight: DEFAULT_CANVAS_MAX_HEIGHT });
@@ -410,6 +415,13 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
       maxWidth: Math.min(canvasBounds.maxWidth, MOBILE_SAFE_CANVAS_MAX_WIDTH),
       maxHeight: Math.min(canvasBounds.maxHeight, MOBILE_SAFE_CANVAS_MAX_HEIGHT)
     });
+
+  useEffect(() => {
+    setEditableSetTitle(setTitle);
+    if (!isEditingSetTitle) {
+      setSetTitleDraft(setTitle);
+    }
+  }, [isEditingSetTitle, setTitle]);
 
   useEffect(() => {
     const updateBounds = () => setCanvasBounds(getViewportCanvasBounds());
@@ -844,11 +856,118 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
 
   const colorModalState = getModalState();
 
+  const cancelSetTitleEdit = () => {
+    setIsEditingSetTitle(false);
+    setSetTitleDraft(editableSetTitle);
+    setSetTitleError(null);
+  };
+
+  const persistSetTitle = async () => {
+    const trimmedTitle = setTitleDraft.trim();
+
+    if (!trimmedTitle) {
+      setSetTitleError('Set title cannot be empty.');
+      return;
+    }
+
+    if (trimmedTitle === editableSetTitle) {
+      setIsEditingSetTitle(false);
+      setSetTitleError(null);
+      return;
+    }
+
+    setIsSavingSetTitle(true);
+    setSetTitleError(null);
+
+    const { data, error } = await supabase
+      .from('sets')
+      .update({ title: trimmedTitle })
+      .eq('id', setId)
+      .select('title')
+      .single();
+
+    setIsSavingSetTitle(false);
+
+    if (error) {
+      setSetTitleError(error.message);
+      return;
+    }
+
+    const nextTitle = data?.title ?? trimmedTitle;
+    setEditableSetTitle(nextTitle);
+    setSetTitleDraft(nextTitle);
+    setIsEditingSetTitle(false);
+    setSetTitleError(null);
+  };
+
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <h1 className="text-2xl font-semibold">Design View · {setTitle}</h1>
-        <p className="mt-1 text-sm text-slate-500">Build premium cards with a true design workflow: direct editing, structured layers, and precise positioning.</p>
+        {!isEditingSetTitle ? (
+          <button
+            type="button"
+            className="group focus-ring inline-flex flex-col items-start gap-1 rounded-md px-1 py-1 text-left"
+            onClick={() => {
+              setIsEditingSetTitle(true);
+              setSetTitleError(null);
+            }}
+            aria-label="Rename set title"
+            title="Click to rename set"
+          >
+            <h1 className="text-2xl font-semibold group-hover:underline group-focus-visible:underline">{editableSetTitle}</h1>
+            <span className="inline-flex items-center gap-1 text-xs text-slate-500 transition group-hover:text-slate-700 dark:text-slate-400 dark:group-hover:text-slate-200">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path
+                  d="M4 20h4l10.5-10.5a1.4 1.4 0 0 0 0-2L16.5 5.5a1.4 1.4 0 0 0-2 0L4 16v4z"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              Click title to rename
+            </span>
+          </button>
+        ) : (
+          <div className="space-y-2">
+            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500" htmlFor="set-title-input">
+              Design View title
+            </label>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Input
+                id="set-title-input"
+                value={setTitleDraft}
+                onChange={(event) => {
+                  setSetTitleDraft(event.target.value);
+                  if (setTitleError) setSetTitleError(null);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void persistSetTitle();
+                  }
+
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    cancelSetTitleEdit();
+                  }
+                }}
+                aria-label="Set title"
+                autoFocus
+                disabled={isSavingSetTitle}
+              />
+              <div className="flex items-center gap-2">
+                <Button variant="primary" onClick={() => void persistSetTitle()} disabled={isSavingSetTitle}>
+                  {isSavingSetTitle ? 'Saving...' : 'Save'}
+                </Button>
+                <Button variant="secondary" onClick={cancelSetTitleEdit} disabled={isSavingSetTitle}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+            {setTitleError ? <p className="text-sm text-rose-600 dark:text-rose-400">{setTitleError}</p> : null}
+          </div>
+        )}
       </div>
       <CardNavigator
         index={currentIndex}
