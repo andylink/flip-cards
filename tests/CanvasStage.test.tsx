@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { CanvasStage } from '@/components/CanvasStage';
 
@@ -26,12 +27,23 @@ vi.mock('react-konva', () => ({
       {children}
     </div>
   ),
-  Layer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  Layer: React.forwardRef(function Layer(
+    { children }: { children: React.ReactNode },
+    ref: React.ForwardedRef<HTMLDivElement>
+  ) {
+    return <div ref={ref}>{children}</div>;
+  }),
   Text: () => <div data-testid="text-node" />,
   Rect: () => <div data-testid="rect-node" />,
   Circle: () => <div data-testid="circle-node" />,
   Line: () => <div data-testid="line-node" />,
-  Image: () => <div data-testid="image-node" />
+  Image: () => <div data-testid="image-node" />,
+  Transformer: React.forwardRef(function Transformer(
+    _: Record<string, never>,
+    ref: React.ForwardedRef<HTMLDivElement>
+  ) {
+    return <div ref={ref} data-testid="transformer" />;
+  })
 }));
 
 describe('CanvasStage', () => {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Layer, Line, Rect, Stage, Text, Circle, Image as KonvaImage } from 'react-konva';
+import { Layer, Line, Rect, Stage, Text, Circle, Transformer, Image as KonvaImage } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import { CanvasNode, CanvasState } from '@/lib/types/domain';
 import { snapToGrid } from '@/lib/utils/canvas';
@@ -125,7 +125,8 @@ function drawNode(
   editingNodeId: string | null,
   onSelectIds: (ids: string[]) => void,
   onStartTextEdit: (node: CanvasNode) => void,
-  onMove: (id: string, x: number, y: number) => void
+  onMove: (id: string, x: number, y: number) => void,
+  onResize: (nodeId: string, nextNode: CanvasNode) => void
 ) {
   if (node.hidden) return null;
 
@@ -189,6 +190,20 @@ function drawNode(
         height={node.height ?? 100}
         {...fillProps}
         {...strokeProps}
+        onTransformEnd={(event: any) => {
+          const target = event.target;
+          const nextWidth = Math.max(8, Math.round((node.width ?? 180) * target.scaleX()));
+          const nextHeight = Math.max(8, Math.round((node.height ?? 100) * target.scaleY()));
+          target.scaleX(1);
+          target.scaleY(1);
+          onResize(node.id, {
+            ...node,
+            x: snapToGrid(target.x(), GRID),
+            y: snapToGrid(target.y(), GRID),
+            width: snapToGrid(nextWidth, GRID),
+            height: snapToGrid(nextHeight, GRID)
+          });
+        }}
       />
     );
   }
@@ -196,7 +211,30 @@ function drawNode(
   if (node.type === 'circle') {
     const fillProps = toKonvaFill(node, '#bbf7d0');
     const strokeProps = toKonvaStroke(node, '#334155', 2);
-    return <Circle key={node.id} id={node.id} {...common} radius={node.radius ?? 50} {...fillProps} {...strokeProps} />;
+    return (
+      <Circle
+        key={node.id}
+        id={node.id}
+        {...common}
+        radius={node.radius ?? 50}
+        {...fillProps}
+        {...strokeProps}
+        onTransformEnd={(event: any) => {
+          const target = event.target;
+          const scaleX = target.scaleX();
+          const scaleY = target.scaleY();
+          const nextRadius = Math.max(8, Math.round((node.radius ?? 50) * Math.max(scaleX, scaleY)));
+          target.scaleX(1);
+          target.scaleY(1);
+          onResize(node.id, {
+            ...node,
+            x: snapToGrid(target.x(), GRID),
+            y: snapToGrid(target.y(), GRID),
+            radius: snapToGrid(nextRadius, GRID)
+          });
+        }}
+      />
+    );
   }
 
   if (node.type === 'line') {
@@ -208,6 +246,24 @@ function drawNode(
         {...common}
         points={node.points ?? [0, 0, 120, 0]}
         {...strokeProps}
+        onTransformEnd={(event: any) => {
+          const target = event.target;
+          const scaleX = target.scaleX();
+          const scaleY = target.scaleY();
+          const sourcePoints = node.points ?? [0, 0, 120, 0];
+          const nextPoints = sourcePoints.map((value, index) =>
+            index % 2 === 0 ? Math.round(value * scaleX) : Math.round(value * scaleY)
+          );
+
+          target.scaleX(1);
+          target.scaleY(1);
+          onResize(node.id, {
+            ...node,
+            x: snapToGrid(target.x(), GRID),
+            y: snapToGrid(target.y(), GRID),
+            points: nextPoints
+          });
+        }}
       />
     );
   }
@@ -242,9 +298,12 @@ export function CanvasStage({
   const viewportPadding = 32; // p-4 around card frame in viewport area
 
   const [textEditor, setTextEditor] = useState<TextEditorState | null>(null);
+  const [shiftPressed, setShiftPressed] = useState(false);
   const textEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const suppressNextBlurRef = useRef(false);
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const layerRef = useRef<any>(null);
+  const transformerRef = useRef<any>(null);
   const [viewportWidth, setViewportWidth] = useState<number>(canvas.width + viewportPadding + cardChromePadding);
   const [viewportHeight, setViewportHeight] = useState<number>(900);
 
@@ -282,6 +341,30 @@ export function CanvasStage({
     updateHeight();
     window.addEventListener('resize', updateHeight);
     return () => window.removeEventListener('resize', updateHeight);
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Shift') {
+        setShiftPressed(true);
+      }
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.key === 'Shift') {
+        setShiftPressed(false);
+      }
+    };
+    const onWindowBlur = () => setShiftPressed(false);
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onWindowBlur);
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onWindowBlur);
+    };
   }, []);
 
   const effectiveViewportWidth = viewportWidth > 0 ? viewportWidth : canvas.width + viewportPadding + cardChromePadding;
@@ -553,6 +636,38 @@ export function CanvasStage({
     [activeTool, canvas.nodes, selectedIds, textEditor?.nodeId]
   );
 
+  const selectedShapeNode = useMemo(() => {
+    if (activeTool !== 'select' || selectedIds.length !== 1) return null;
+    const selectedNode = canvas.nodes.find((node) => node.id === selectedIds[0]);
+    if (!selectedNode) return null;
+    if (selectedNode.type !== 'rect' && selectedNode.type !== 'circle' && selectedNode.type !== 'line') return null;
+    return selectedNode;
+  }, [activeTool, canvas.nodes, selectedIds]);
+
+  useEffect(() => {
+    const transformer = transformerRef.current;
+    const layer = layerRef.current;
+    if (!transformer || !layer) return;
+    if (typeof transformer.nodes !== 'function' || typeof layer.findOne !== 'function') return;
+    if (typeof layer.batchDraw !== 'function') return;
+
+    if (!selectedShapeNode) {
+      transformer.nodes([]);
+      layer.batchDraw();
+      return;
+    }
+
+    const selectedKonvaNode = layer.findOne(`#${selectedShapeNode.id}`);
+    if (!selectedKonvaNode) {
+      transformer.nodes([]);
+      layer.batchDraw();
+      return;
+    }
+
+    transformer.nodes([selectedKonvaNode]);
+    layer.batchDraw();
+  }, [selectedShapeNode, shiftPressed]);
+
   return (
     <div className="space-y-3">
       <div ref={viewportRef} className="w-full overflow-auto rounded-xl bg-slate-100 p-4">
@@ -573,7 +688,7 @@ export function CanvasStage({
           onMouseDown={handleStagePointerDown}
           onTouchStart={handleStagePointerDown}
         >
-          <Layer scaleX={scale} scaleY={scale}>
+          <Layer ref={layerRef} scaleX={scale} scaleY={scale}>
             {canvas.nodes.map((node) =>
               drawNode(
                 node,
@@ -589,9 +704,32 @@ export function CanvasStage({
                       candidate.id === id ? { ...candidate, x, y } : candidate
                     )
                   });
+                },
+                (nodeId, nextNode) => {
+                  onCanvasChange({
+                    ...canvas,
+                    nodes: canvas.nodes.map((candidate) =>
+                      candidate.id === nodeId ? nextNode : candidate
+                    )
+                  });
                 }
               )
             )}
+            {selectedShapeNode ? (
+              <Transformer
+                ref={transformerRef}
+                rotateEnabled={false}
+                keepRatio={selectedShapeNode.type === 'circle' || shiftPressed}
+                flipEnabled={false}
+                boundBoxFunc={(oldBox: any, newBox: any) => {
+                  const minSize = 8;
+                  if (Math.abs(newBox.width) < minSize || Math.abs(newBox.height) < minSize) {
+                    return oldBox;
+                  }
+                  return newBox;
+                }}
+              />
+            ) : null}
             {selectionBounds.map(({ id, bounds }) => (
               <Rect
                 key={`selection-${id}`}
