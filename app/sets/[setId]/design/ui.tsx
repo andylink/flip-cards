@@ -519,6 +519,71 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     }
   };
 
+  const duplicateCurrentCard = async () => {
+    if (!currentCard) return;
+
+    const orderIndex = cards.length;
+    const duplicatedCanvas = normalizeCanvasState(currentCard.canvas_json);
+    const duplicateTitle = currentCard.title ? `${currentCard.title} Copy` : `Card ${orderIndex + 1}`;
+
+    const { data: duplicatedCard } = await supabase
+      .from('cards')
+      .insert({
+        set_id: setId,
+        title: duplicateTitle,
+        canvas_json: duplicatedCanvas,
+        order_index: orderIndex
+      })
+      .select('id,title,canvas_json,order_index,set_id')
+      .single();
+
+    if (!duplicatedCard) return;
+
+    const existingAnswer = currentCard.answers?.[0];
+    let duplicatedAnswer: { id: string; type: AnswerType; schema_json: unknown } | null = null;
+
+    if (existingAnswer) {
+      const { data: answerData } = await supabase
+        .from('answers')
+        .insert({
+          card_id: duplicatedCard.id,
+          type: existingAnswer.type,
+          schema_json: existingAnswer.schema_json
+        })
+        .select('id,type,schema_json')
+        .single();
+
+      duplicatedAnswer = answerData ?? null;
+    }
+
+    setCards((prev) => [
+      ...prev,
+      {
+        ...duplicatedCard,
+        answers: duplicatedAnswer ? [duplicatedAnswer] : []
+      }
+    ]);
+    setCurrentIndex(orderIndex);
+  };
+
+  const deleteCurrentCard = async () => {
+    if (!currentCard) return;
+
+    const deletingCardId = currentCard.id;
+    const { error } = await supabase
+      .from('cards')
+      .delete()
+      .eq('id', deletingCardId)
+      .eq('set_id', setId);
+
+    if (error) return;
+
+    const nextCards = cards.filter((card) => card.id !== deletingCardId);
+    setCards(nextCards);
+    setCurrentIndex((index) => (nextCards.length === 0 ? 0 : Math.min(index, nextCards.length - 1)));
+    setSelectedIds([]);
+  };
+
   const updateSelectedTextNodes = (
     updates: Partial<Pick<Extract<CanvasNode, { type: 'text' }>, 'fontFamily' | 'fontSize' | 'fontWeight' | 'fill'>>
   ) => {
@@ -710,9 +775,8 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
         onPrevious={() => setCurrentIndex((index) => Math.max(index - 1, 0))}
         onNext={() => setCurrentIndex((index) => Math.min(index + 1, cards.length - 1))}
         onAdd={addCard}
-        onDuplicate={duplicateSelection}
-        onDelete={deleteSelection}
-        canDelete={selectedIds.length > 0}
+        onDuplicate={duplicateCurrentCard}
+        onDelete={deleteCurrentCard}
       />
       <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)_420px]">
         <aside className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
