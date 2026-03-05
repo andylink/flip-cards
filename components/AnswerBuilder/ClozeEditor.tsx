@@ -1,36 +1,60 @@
 'use client';
 
 import { Input } from '@/components/Common/Input';
-import { clozeTokens } from '@/lib/utils/answerEvaluation';
+import { clozePlaceholderIds } from '@/lib/utils/answerEvaluation';
 
 type Props = {
   template: string;
   acceptedByBlank: string[];
   onChange: (next: { template: string; acceptedByBlank: string[] }) => void;
+  templateLocked?: boolean;
 };
 
-export function ClozeEditor({ template, acceptedByBlank, onChange }: Props) {
-  const blanks = clozeTokens(template).length;
+const remapAcceptedByPlaceholder = (
+  previousTemplate: string,
+  nextTemplate: string,
+  previousAcceptedByBlank: string[]
+) => {
+  const previousIds = clozePlaceholderIds(previousTemplate);
+  const nextIds = clozePlaceholderIds(nextTemplate);
+  const previousById = new Map<number, string>();
+
+  previousIds.forEach((id, index) => {
+    previousById.set(id, previousAcceptedByBlank[index] ?? '');
+  });
+
+  return nextIds.map((id) => previousById.get(id) ?? '');
+};
+
+export function ClozeEditor({ template, acceptedByBlank, onChange, templateLocked = false }: Props) {
+  const placeholderIds = clozePlaceholderIds(template);
 
   return (
     <div className="space-y-2">
       <Input
         aria-label="Cloze template"
         value={template}
-        onChange={(e) => onChange({ template: e.target.value, acceptedByBlank })}
-        placeholder="Example: DNA is {{blank}}"
+        onChange={(e) =>
+          onChange({
+            template: e.target.value,
+            acceptedByBlank: remapAcceptedByPlaceholder(template, e.target.value, acceptedByBlank)
+          })
+        }
+        placeholder="Example: DNA is {{1}}"
+        disabled={templateLocked}
       />
-      {Array.from({ length: blanks }).map((_, index) => (
+      <p className="text-xs text-slate-500">Use placeholders like {`{{1}}`}, {`{{2}}`} in the prompt text.</p>
+      {placeholderIds.map((placeholderId, index) => (
         <Input
-          key={index}
-          aria-label={`Accepted answers blank ${index + 1}`}
+          key={placeholderId}
+          aria-label={`Accepted answers blank ${placeholderId}`}
           value={acceptedByBlank[index] ?? ''}
           onChange={(e) => {
             const next = [...acceptedByBlank];
             next[index] = e.target.value;
             onChange({ template, acceptedByBlank: next });
           }}
-          placeholder={`Blank ${index + 1}: answer1,answer2`}
+          placeholder={`Blank ${placeholderId}: answer1,answer2`}
         />
       ))}
     </div>

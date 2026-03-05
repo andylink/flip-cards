@@ -23,6 +23,8 @@ export const clozeSchema = z.object({
   )
 });
 
+const CLOZE_TOKEN_REGEX = /{{\s*(blank|[1-9]\d*)\s*}}/gi;
+
 export const dropdownSchema = z.object({
   questions: z.array(
     z.object({
@@ -98,5 +100,23 @@ export function evaluateAnswer(type: AnswerType, schemaJson: unknown, responseJs
 }
 
 export function clozeTokens(template: string): string[] {
-  return Array.from(template.matchAll(/{{\s*blank\s*}}/g)).map((token) => token[0]);
+  return Array.from(template.matchAll(CLOZE_TOKEN_REGEX)).map((token) => token[0]);
+}
+
+export function clozePlaceholderIds(template: string): number[] {
+  const matches = Array.from(template.matchAll(CLOZE_TOKEN_REGEX));
+  const orderedUniqueIds: number[] = [];
+  const seen = new Set<number>();
+  let nextLegacyId = 1;
+
+  for (const match of matches) {
+    const raw = (match[1] ?? '').toLowerCase();
+    const id = raw === 'blank' ? nextLegacyId++ : Number(raw);
+    if (!Number.isInteger(id) || id <= 0) continue;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    orderedUniqueIds.push(id);
+  }
+
+  return orderedUniqueIds;
 }

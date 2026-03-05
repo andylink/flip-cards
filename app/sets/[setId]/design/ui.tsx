@@ -11,7 +11,7 @@ import { Select } from '@/components/Common/Select';
 import { Button } from '@/components/Common/Button';
 import { Input } from '@/components/Common/Input';
 import { Modal } from '@/components/Common/Modal';
-import { clozeSchema, dropdownSchema, freeFormSchema, mcqSchema } from '@/lib/utils/answerEvaluation';
+import { clozePlaceholderIds, clozeSchema, dropdownSchema, freeFormSchema, mcqSchema } from '@/lib/utils/answerEvaluation';
 import { CANVAS_MIN_HEIGHT, CANVAS_MIN_WIDTH, clampPortraitCanvasSize } from '@/lib/utils/canvas';
 import { CanvasAppearanceDefaults, getNodeFillColor, normalizeCanvasState } from '@/lib/utils/canvasAppearance';
 import { z } from 'zod';
@@ -83,6 +83,7 @@ const COMMON_COLOR_SWATCHES = [
   '#ec4899'
 ];
 const STROKE_WIDTH_OPTIONS = [0, 1, 2, 3, 4, 6, 8, 12];
+const TEXT_RIGHT_PADDING = 16;
 
 type ColorModalTarget = 'fill' | 'stroke' | 'background' | null;
 
@@ -111,7 +112,7 @@ type CanvasAlignment =
   | 'v-center'
   | 'bottom';
 
-const getNodeBounds = (node: CanvasNode): NodeBounds | null => {
+const getNodeBounds = (node: CanvasNode, canvasWidth: number): NodeBounds | null => {
   if (node.hidden) return null;
 
   if (node.type === 'rect' || node.type === 'image' || node.type === 'group') {
@@ -159,13 +160,19 @@ const getNodeBounds = (node: CanvasNode): NodeBounds | null => {
 
   if (node.type === 'text') {
     const fontSize = node.fontSize ?? 24;
-    const lines = (node.text ?? '').split('\n');
-    const maxLineLength = lines.reduce((largest, line) => Math.max(largest, line.length), 0);
+    const minimumWidth = Math.max(96, Math.round(fontSize * 4));
+    const flowWidth = Math.max(minimumWidth, canvasWidth - node.x - TEXT_RIGHT_PADDING);
+    const averageCharacterWidth = Math.max(1, fontSize * 0.58);
+    const charactersPerLine = Math.max(1, Math.floor(flowWidth / averageCharacterWidth));
+    const explicitLines = (node.text ?? '').split('\n');
+    const wrappedLineCount = explicitLines.reduce((count, line) => {
+      return count + Math.max(1, Math.ceil(line.length / charactersPerLine));
+    }, 0);
     return {
       x: node.x,
       y: node.y,
-      width: Math.max(fontSize * 0.8, maxLineLength * fontSize * 0.6),
-      height: Math.max(fontSize * 1.2, lines.length * fontSize * 1.2)
+      width: flowWidth,
+      height: Math.max(fontSize * 1.2, wrappedLineCount * fontSize * 1.2)
     };
   }
 
@@ -188,6 +195,7 @@ type McqEditorState = {
 type ClozeEditorState = {
   template: string;
   acceptedByBlank: string[];
+  sourceNodeId: string | null;
 };
 
 type DropdownEditorState = {
@@ -245,12 +253,29 @@ const createDefaultDraft = (): AnswerDraft => ({
   },
   cloze: {
     template: '',
-    acceptedByBlank: []
+    acceptedByBlank: [],
+    sourceNodeId: null
   },
   dropdown: {
     questions: []
   }
 });
+
+const remapAcceptedByPlaceholder = (
+  previousTemplate: string,
+  nextTemplate: string,
+  previousAcceptedByBlank: string[]
+): string[] => {
+  const previousIds = clozePlaceholderIds(previousTemplate);
+  const nextIds = clozePlaceholderIds(nextTemplate);
+  const acceptedById = new Map<number, string>();
+
+  previousIds.forEach((id, index) => {
+    acceptedById.set(id, previousAcceptedByBlank[index] ?? '');
+  });
+
+  return nextIds.map((id) => acceptedById.get(id) ?? '');
+};
 
 const toEditorDraft = (type: AnswerType, schemaJson: unknown): AnswerDraft => {
   const base = createDefaultDraft();
@@ -285,7 +310,8 @@ const toEditorDraft = (type: AnswerType, schemaJson: unknown): AnswerDraft => {
     if (parsed.success) {
       base.cloze = {
         template: parsed.data.template,
-        acceptedByBlank: parsed.data.blanks.map((blank) => blank.accepted.join(','))
+        acceptedByBlank: parsed.data.blanks.map((blank) => blank.accepted.join(',')),
+        sourceNodeId: null
       };
     }
     return base;
@@ -779,6 +805,80 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
   );
   const showShapeAppearanceControls = isShapeToolActive || hasSelectedShapeNode;
 
+  const textNodes = useMemo(
+    () => canvas.nodes.filter((node): node is Extract<CanvasNode, { type: 'text' }> => node.type === 'text'),
+    [canvas.nodes]
+  );
+
+  const selectedTextNode = useMemo(() => {
+    if (selectedIds.length !== 1) return null;
+    const candidate = canvas.nodes.find((node) => node.id === selectedIds[0]);
+    return candidate?.type === 'text' ? candidate : null;
+  }, [canvas.nodes, selectedIds]);
+
+  const clozeSourceNode = useMemo(() => {
+    if (!answerDraft.cloze.sourceNodeId) return null;
+    const candidate = canvas.nodes.find((node) => node.id === answerDraft.cloze.sourceNodeId);
+    return candidate?.type === 'text' ? candidate : null;
+  }, [answerDraft.cloze.sourceNodeId, canvas.nodes]);
+
+  useEffect(() => {
+    if (answerType !== 'cloze') return;
+    if (!answerDraft.cloze.sourceNodeId) return;
+
+    const sourceNode = canvas.nodes.find((node) => node.id === answerDraft.cloze.sourceNodeId);
+    if (!sourceNode || sourceNode.type !== 'text') {
+      setAnswerDraft((prev) => ({
+        ...prev,
+        cloze: {
+          ...prev.cloze,
+          sourceNodeId: null
+        }
+      }));
+      return;
+    }
+
+    const nextTemplate = sourceNode.text ?? '';
+    if (nextTemplate === answerDraft.cloze.template) return;
+
+    setAnswerDraft((prev) => ({
+      ...prev,
+      cloze: {
+        ...prev.cloze,
+        template: nextTemplate,
+        acceptedByBlank: remapAcceptedByPlaceholder(prev.cloze.template, nextTemplate, prev.cloze.acceptedByBlank)
+      }
+    }));
+    setAnswerLastModifiedAt(Date.now());
+  }, [answerDraft.cloze.sourceNodeId, answerDraft.cloze.template, answerType, canvas.nodes]);
+
+  const linkClozeTemplateToSelectedText = () => {
+    if (!selectedTextNode) return;
+    const nextTemplate = selectedTextNode.text ?? '';
+
+    setAnswerDraft((prev) => ({
+      ...prev,
+      cloze: {
+        ...prev.cloze,
+        sourceNodeId: selectedTextNode.id,
+        template: nextTemplate,
+        acceptedByBlank: remapAcceptedByPlaceholder(prev.cloze.template, nextTemplate, prev.cloze.acceptedByBlank)
+      }
+    }));
+    setAnswerLastModifiedAt(Date.now());
+  };
+
+  const unlinkClozeTemplate = () => {
+    if (!answerDraft.cloze.sourceNodeId) return;
+    setAnswerDraft((prev) => ({
+      ...prev,
+      cloze: {
+        ...prev.cloze,
+        sourceNodeId: null
+      }
+    }));
+  };
+
   const alignSelectedToCanvas = (alignment: CanvasAlignment) => {
     const selected = new Set(selectedIds);
     if (selected.size === 0) return;
@@ -787,7 +887,7 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     const nextNodes = canvas.nodes.map((node) => {
       if (!selected.has(node.id) || node.locked) return node;
 
-      const bounds = getNodeBounds(node);
+      const bounds = getNodeBounds(node, canvas.width);
       if (!bounds) return node;
 
       let deltaX = 0;
@@ -1343,14 +1443,48 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
               />
             ) : null}
             {answerType === 'cloze' ? (
-              <ClozeEditor
-                template={answerDraft.cloze.template}
-                acceptedByBlank={answerDraft.cloze.acceptedByBlank}
-                onChange={(next) => {
-                  setAnswerDraft((prev) => ({ ...prev, cloze: next }));
-                  setAnswerLastModifiedAt(Date.now());
-                }}
-              />
+              <div className="space-y-2">
+                <div className="space-y-2 rounded-md border border-slate-200 p-2 text-xs text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                  <p>Write placeholders in your card text as {`{{1}}`}, {`{{2}}`} and link that text node here.</p>
+                  <p>Selected text nodes: {textNodes.length}</p>
+                  {clozeSourceNode ? (
+                    <p className="rounded bg-slate-100 px-2 py-1 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                      Linked node text: {(clozeSourceNode.text ?? '').slice(0, 120) || '(empty text node)'}
+                    </p>
+                  ) : null}
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="secondary"
+                      onClick={linkClozeTemplateToSelectedText}
+                      disabled={!selectedTextNode}
+                    >
+                      Link Selected Text
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={unlinkClozeTemplate}
+                      disabled={!answerDraft.cloze.sourceNodeId}
+                    >
+                      Unlink
+                    </Button>
+                  </div>
+                </div>
+                <ClozeEditor
+                  template={answerDraft.cloze.template}
+                  acceptedByBlank={answerDraft.cloze.acceptedByBlank}
+                  templateLocked={Boolean(answerDraft.cloze.sourceNodeId)}
+                  onChange={(next) => {
+                    setAnswerDraft((prev) => ({
+                      ...prev,
+                      cloze: {
+                        ...next,
+                        sourceNodeId: prev.cloze.sourceNodeId
+                      }
+                    }));
+                    setAnswerLastModifiedAt(Date.now());
+                  }}
+                />
+              </div>
             ) : null}
             {answerType === 'dropdown' ? (
               <DropdownEditor

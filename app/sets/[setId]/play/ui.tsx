@@ -110,7 +110,7 @@ export function PlayClient({ setId, setTitle, initialCards, userId }: Props) {
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,1fr)]">
         <section className="rounded-md border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
           <h2 className="mb-3 text-lg font-semibold">Card</h2>
-          <TestCardPreview canvas={current.canvas_json} />
+          <TestCardPreview canvas={current.canvas_json} answerType={answer.type} schemaJson={answer.schema_json} />
         </section>
 
         <section className="space-y-4 rounded-md border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">

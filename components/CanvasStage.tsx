@@ -57,7 +57,15 @@ type NodeBounds = {
   height: number;
 };
 
-function getNodeBounds(node: CanvasNode): NodeBounds | null {
+const TEXT_RIGHT_PADDING = 16;
+
+function getTextFlowWidth(x: number, canvasWidth: number, fontSize: number): number {
+  const minimumWidth = Math.max(96, Math.round(fontSize * 4));
+  const available = Math.max(minimumWidth, canvasWidth - x - TEXT_RIGHT_PADDING);
+  return available;
+}
+
+function getNodeBounds(node: CanvasNode, canvasWidth: number): NodeBounds | null {
   if (node.hidden) return null;
 
   if (node.type === 'rect' || node.type === 'image' || node.type === 'group') {
@@ -105,13 +113,18 @@ function getNodeBounds(node: CanvasNode): NodeBounds | null {
 
   if (node.type === 'text') {
     const fontSize = node.fontSize ?? 24;
-    const lines = (node.text ?? '').split('\n');
-    const maxLineLength = lines.reduce((largest, line) => Math.max(largest, line.length), 0);
+    const flowWidth = getTextFlowWidth(node.x, canvasWidth, fontSize);
+    const averageCharacterWidth = Math.max(1, fontSize * 0.58);
+    const charactersPerLine = Math.max(1, Math.floor(flowWidth / averageCharacterWidth));
+    const explicitLines = (node.text ?? '').split('\n');
+    const wrappedLineCount = explicitLines.reduce((count, line) => {
+      return count + Math.max(1, Math.ceil(line.length / charactersPerLine));
+    }, 0);
     return {
       x: node.x,
       y: node.y,
-      width: Math.max(fontSize * 0.8, maxLineLength * fontSize * 0.6),
-      height: Math.max(fontSize * 1.2, lines.length * fontSize * 1.2)
+      width: flowWidth,
+      height: Math.max(fontSize * 1.2, wrappedLineCount * fontSize * 1.2)
     };
   }
 
@@ -120,6 +133,7 @@ function getNodeBounds(node: CanvasNode): NodeBounds | null {
 
 function drawNode(
   node: CanvasNode,
+  canvasWidth: number,
   selectedIds: string[],
   activeTool: CanvasTool,
   editingNodeId: string | null,
@@ -147,6 +161,7 @@ function drawNode(
 
   if (node.type === 'text') {
     const fillProps = toKonvaFill(node, '#0f172a');
+    const flowWidth = getTextFlowWidth(node.x, canvasWidth, node.fontSize ?? 24);
     return (
       <Text
         key={node.id}
@@ -155,6 +170,8 @@ function drawNode(
         visible={editingNodeId !== node.id}
         draggable={activeTool === 'move' && !node.locked && editingNodeId !== node.id}
         text={node.text ?? ''}
+        width={flowWidth}
+        wrap="word"
         fontFamily={node.fontFamily ?? 'Arial'}
         fontSize={node.fontSize ?? 24}
         fontStyle={node.fontWeight === '700' ? 'bold' : 'normal'}
@@ -630,11 +647,15 @@ export function CanvasStage({
       activeTool === 'select'
         ? canvas.nodes
             .filter((node) => selectedIds.includes(node.id) && node.id !== textEditor?.nodeId)
-            .map((node) => ({ id: node.id, bounds: getNodeBounds(node) }))
+            .map((node) => ({ id: node.id, bounds: getNodeBounds(node, canvas.width) }))
             .filter((entry): entry is { id: string; bounds: NodeBounds } => Boolean(entry.bounds))
         : [],
-    [activeTool, canvas.nodes, selectedIds, textEditor?.nodeId]
+    [activeTool, canvas.nodes, canvas.width, selectedIds, textEditor?.nodeId]
   );
+
+  const textEditorFlowWidth = textEditor
+    ? getTextFlowWidth(textEditor.x, canvas.width, textEditor.fontSize)
+    : 0;
 
   const selectedShapeNode = useMemo(() => {
     if (activeTool !== 'select' || selectedIds.length !== 1) return null;
@@ -708,6 +729,7 @@ export function CanvasStage({
             {canvas.nodes.map((node) =>
               drawNode(
                 node,
+                canvas.width,
                 selectedIds,
                 activeTool,
                 textEditor?.nodeId ?? null,
@@ -793,7 +815,7 @@ export function CanvasStage({
               style={{
                 left: textEditor.x * scale,
                 top: textEditor.y * scale,
-                minWidth: Math.max(72, 120 * scale),
+                width: Math.max(72, textEditorFlowWidth * scale),
                 zIndex: 20,
                 fontFamily: textEditor.fontFamily,
                 fontSize: Math.max(12, textEditor.fontSize * scale),

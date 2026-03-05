@@ -2,26 +2,88 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Stage, Layer, Rect, Circle, Line, Text, Image as KonvaImage } from 'react-konva';
-import { CanvasNode, CanvasState } from '@/lib/types/domain';
+import { AnswerType, CanvasNode, CanvasState } from '@/lib/types/domain';
 import { normalizeCanvasState, toKonvaFill, toKonvaStroke } from '@/lib/utils/canvasAppearance';
+import { clozeSchema } from '@/lib/utils/answerEvaluation';
 
 type Props = {
   canvas: CanvasState;
+  answerType?: AnswerType;
+  schemaJson?: unknown;
 };
 
 const FALLBACK_CARD_WIDTH = 720;
+const TEXT_RIGHT_PADDING = 16;
+const CLOZE_TOKEN_REGEX = /{{\s*(blank|[1-9]\d*)\s*}}/gi;
 
-function renderNode(node: CanvasNode, imagesById: Record<string, HTMLImageElement | undefined>) {
+const SUPERSCRIPT_DIGITS: Record<string, string> = {
+  '0': '0',
+  '1': '1',
+  '2': '2',
+  '3': '3',
+  '4': '4',
+  '5': '5',
+  '6': '6',
+  '7': '7',
+  '8': '8',
+  '9': '9'
+};
+
+function toSuperscript(value: number): string {
+  return String(value)
+    .split('')
+    .map((digit) => {
+      if (digit === '0') return '⁰';
+      if (digit === '1') return '¹';
+      if (digit === '2') return '²';
+      if (digit === '3') return '³';
+      if (digit === '4') return '⁴';
+      if (digit === '5') return '⁵';
+      if (digit === '6') return '⁶';
+      if (digit === '7') return '⁷';
+      if (digit === '8') return '⁸';
+      if (digit === '9') return '⁹';
+      return SUPERSCRIPT_DIGITS[digit] ?? digit;
+    })
+    .join('');
+}
+
+function toClozePreviewText(template: string): string {
+  let legacyBlankIndex = 1;
+  return template.replace(CLOZE_TOKEN_REGEX, (_, token: string) => {
+    const normalized = (token ?? '').toLowerCase();
+    const placeholderId = normalized === 'blank' ? legacyBlankIndex++ : Number(normalized);
+    if (!Number.isInteger(placeholderId) || placeholderId <= 0) {
+      return '_______';
+    }
+    return `_______${toSuperscript(placeholderId)}`;
+  });
+}
+
+function getTextFlowWidth(x: number, canvasWidth: number, fontSize: number): number {
+  const minimumWidth = Math.max(96, Math.round(fontSize * 4));
+  return Math.max(minimumWidth, canvasWidth - x - TEXT_RIGHT_PADDING);
+}
+
+function renderNode(
+  node: CanvasNode,
+  cardWidth: number,
+  textTransform: (value: string) => string,
+  imagesById: Record<string, HTMLImageElement | undefined>
+) {
   if (node.hidden) return null;
 
   if (node.type === 'text') {
     const fillProps = toKonvaFill(node, '#0f172a');
+    const flowWidth = getTextFlowWidth(node.x, cardWidth, node.fontSize ?? 24);
     return (
       <Text
         key={node.id}
         x={node.x}
         y={node.y}
-        text={node.text ?? ''}
+        text={textTransform(node.text ?? '')}
+        width={flowWidth}
+        wrap="word"
         fontFamily={node.fontFamily ?? 'Arial'}
         fontSize={node.fontSize ?? 24}
         fontStyle={node.fontWeight === '700' ? 'bold' : 'normal'}
@@ -85,8 +147,21 @@ function renderNode(node: CanvasNode, imagesById: Record<string, HTMLImageElemen
   return null;
 }
 
-export function TestCardPreview({ canvas }: Props) {
+export function TestCardPreview({ canvas, answerType, schemaJson }: Props) {
   const normalizedCanvas = useMemo(() => normalizeCanvasState(canvas), [canvas]);
+  const clozeTemplate = useMemo(() => {
+    if (answerType !== 'cloze') return null;
+    const parsed = clozeSchema.safeParse(schemaJson);
+    return parsed.success ? parsed.data.template : null;
+  }, [answerType, schemaJson]);
+  const textTransform = useMemo(() => {
+    if (!clozeTemplate) {
+      return (value: string) => value;
+    }
+
+    return (value: string) => (value === clozeTemplate ? toClozePreviewText(value) : value);
+  }, [clozeTemplate]);
+
   const cardWidth = normalizedCanvas.width || FALLBACK_CARD_WIDTH;
   const cardHeight = normalizedCanvas.height || Math.round(FALLBACK_CARD_WIDTH * 1.5);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -159,7 +234,7 @@ export function TestCardPreview({ canvas }: Props) {
       <Stage width={stageWidth} height={stageHeight}>
         <Layer scaleX={scale} scaleY={scale}>
           <Rect x={0} y={0} width={cardWidth} height={cardHeight} fill={normalizedCanvas.backgroundColor ?? '#ffffff'} />
-          {normalizedCanvas.nodes.map((node) => renderNode(node, imagesById))}
+          {normalizedCanvas.nodes.map((node) => renderNode(node, cardWidth, textTransform, imagesById))}
         </Layer>
       </Stage>
     </div>
