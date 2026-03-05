@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { HoldToDeleteSetButton } from './HoldToDeleteSetButton';
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -40,6 +41,7 @@ export default async function DashboardPage() {
               <Link className="focus-ring rounded bg-slate-200 px-2 py-1 dark:bg-slate-700" href={`/sets/${set.id}/play`}>
                 Play
               </Link>
+              <HoldToDeleteSetButton setId={set.id} />
             </div>
           </li>
         ))}
