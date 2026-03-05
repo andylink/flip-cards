@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Layer, Line, Rect, Stage, Text, Circle, Transformer, Image as KonvaImage } from 'react-konva';
+import { Group, Layer, Line, Rect, Stage, Text, Circle, Transformer, Image as KonvaImage } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import { CanvasNode, CanvasState } from '@/lib/types/domain';
 import { snapToGrid } from '@/lib/utils/canvas';
@@ -35,6 +35,7 @@ type ShapeDefaults = {
 type TextEditorState = {
   nodeId: string;
   value: string;
+  formattedValue: string;
   x: number;
   y: number;
   fontFamily: string;
@@ -54,6 +55,8 @@ type Props = {
   shapeDefaults: ShapeDefaults;
   onSelectIds: (ids: string[]) => void;
   onCanvasChange: (canvas: CanvasState) => void;
+  textFormatRequest?: { id: number; format: 'bold' | 'italic' } | null;
+  onTextFormatRequestHandled?: (requestId: number, handled: boolean) => void;
 };
 
 type NodeBounds = {
@@ -64,6 +67,204 @@ type NodeBounds = {
 };
 
 const TEXT_RIGHT_PADDING = 16;
+
+const INLINE_BOLD_MARKER = '**';
+const INLINE_ITALIC_MARKER = '_';
+
+function stripInlineFormatMarkers(value: string): string {
+  return value.replace(/\*\*|_/g, '');
+}
+
+function parseInlineStyledText(value: string): { text: string; bold: boolean; italic: boolean }[] {
+  const segments: { text: string; bold: boolean; italic: boolean }[] = [];
+  let index = 0;
+  let bold = false;
+  let italic = false;
+  let buffer = '';
+
+  const flush = () => {
+    if (!buffer) return;
+    segments.push({ text: buffer, bold, italic });
+    buffer = '';
+  };
+
+  while (index < value.length) {
+    if (value.startsWith(INLINE_BOLD_MARKER, index)) {
+      flush();
+      bold = !bold;
+      index += INLINE_BOLD_MARKER.length;
+      continue;
+    }
+
+    if (value[index] === INLINE_ITALIC_MARKER) {
+      flush();
+      italic = !italic;
+      index += 1;
+      continue;
+    }
+
+    buffer += value[index];
+    index += 1;
+  }
+
+  flush();
+
+  return segments.length > 0 ? segments : [{ text: '', bold: false, italic: false }];
+}
+
+function buildPlainToFormattedMap(formattedValue: string): number[] {
+  const map: number[] = [0];
+  let formattedIndex = 0;
+  let plainIndex = 0;
+
+  while (formattedIndex < formattedValue.length) {
+    if (formattedValue.startsWith(INLINE_BOLD_MARKER, formattedIndex)) {
+      formattedIndex += INLINE_BOLD_MARKER.length;
+      continue;
+    }
+
+    if (formattedValue[formattedIndex] === INLINE_ITALIC_MARKER) {
+      formattedIndex += 1;
+      continue;
+    }
+
+    formattedIndex += 1;
+    plainIndex += 1;
+    map[plainIndex] = formattedIndex;
+  }
+
+  if (map[plainIndex] === undefined) {
+    map[plainIndex] = formattedIndex;
+  }
+
+  return map;
+}
+
+function applyPlainTextEditToFormatted(
+  previousPlainValue: string,
+  nextPlainValue: string,
+  previousFormattedValue: string
+): string {
+  if (previousPlainValue === nextPlainValue) {
+    return previousFormattedValue;
+  }
+
+  let prefixLength = 0;
+  const maxPrefix = Math.min(previousPlainValue.length, nextPlainValue.length);
+  while (prefixLength < maxPrefix && previousPlainValue[prefixLength] === nextPlainValue[prefixLength]) {
+    prefixLength += 1;
+  }
+
+  let suffixLength = 0;
+  const maxSuffix = Math.min(previousPlainValue.length - prefixLength, nextPlainValue.length - prefixLength);
+  while (
+    suffixLength < maxSuffix &&
+    previousPlainValue[previousPlainValue.length - 1 - suffixLength] ===
+      nextPlainValue[nextPlainValue.length - 1 - suffixLength]
+  ) {
+    suffixLength += 1;
+  }
+
+  const previousMiddleStart = prefixLength;
+  const previousMiddleEnd = previousPlainValue.length - suffixLength;
+  const nextMiddle = nextPlainValue.slice(prefixLength, nextPlainValue.length - suffixLength);
+  const plainToFormattedMap = buildPlainToFormattedMap(previousFormattedValue);
+  const formattedMiddleStart = plainToFormattedMap[previousMiddleStart] ?? 0;
+  const formattedMiddleEnd = plainToFormattedMap[previousMiddleEnd] ?? previousFormattedValue.length;
+
+  return (
+    previousFormattedValue.slice(0, formattedMiddleStart) +
+    nextMiddle +
+    previousFormattedValue.slice(formattedMiddleEnd)
+  );
+}
+
+function buildStyledTextLayout(
+  segments: { text: string; bold: boolean; italic: boolean }[],
+  flowWidth: number,
+  fontFamily: string,
+  fontSize: number
+): Array<{ text: string; bold: boolean; italic: boolean; x: number; y: number }> {
+  const chunks: Array<{ text: string; bold: boolean; italic: boolean; x: number; y: number }> = [];
+  const measurementContext =
+    typeof document !== 'undefined' ? document.createElement('canvas').getContext('2d') : null;
+
+  let line = 0;
+  let lineWidth = 0;
+  let chunkText = '';
+  let chunkX = 0;
+  let chunkY = 0;
+  let chunkBold = false;
+  let chunkItalic = false;
+
+  const measureTextWidth = (text: string, bold: boolean, italic: boolean): number => {
+    if (!measurementContext) {
+      return text.length * Math.max(1, fontSize * 0.58);
+    }
+
+    const styleParts: string[] = [];
+    if (italic) styleParts.push('italic');
+    if (bold) styleParts.push('700');
+    styleParts.push(`${fontSize}px`);
+    styleParts.push(fontFamily);
+    measurementContext.font = styleParts.join(' ');
+    return measurementContext.measureText(text).width;
+  };
+
+  const flushChunk = () => {
+    if (!chunkText) return;
+    chunks.push({
+      text: chunkText,
+      bold: chunkBold,
+      italic: chunkItalic,
+      x: chunkX,
+      y: chunkY
+    });
+    chunkText = '';
+  };
+
+  const beginChunk = (bold: boolean, italic: boolean) => {
+    chunkX = lineWidth;
+    chunkY = line * fontSize * 1.2;
+    chunkBold = bold;
+    chunkItalic = italic;
+  };
+
+  segments.forEach((segment) => {
+    for (const char of segment.text) {
+      if (char === '\n') {
+        flushChunk();
+        line += 1;
+        lineWidth = 0;
+        continue;
+      }
+
+      const charWidth = measureTextWidth(char, segment.bold, segment.italic);
+
+      if (lineWidth > 0 && lineWidth + charWidth > flowWidth) {
+        flushChunk();
+        line += 1;
+        lineWidth = 0;
+      }
+
+      if (!chunkText) {
+        beginChunk(segment.bold, segment.italic);
+      }
+
+      if (segment.bold !== chunkBold || segment.italic !== chunkItalic || chunkY !== line * fontSize * 1.2) {
+        flushChunk();
+        beginChunk(segment.bold, segment.italic);
+      }
+
+      chunkText += char;
+      lineWidth += charWidth;
+    }
+  });
+
+  flushChunk();
+
+  return chunks;
+}
 
 function toKonvaTextStyle(fontWeight: string, fontStyle: 'normal' | 'italic'): 'normal' | 'bold' | 'italic' | 'bold italic' {
   const isBold = fontWeight !== '400';
@@ -130,7 +331,7 @@ function getNodeBounds(node: CanvasNode, canvasWidth: number): NodeBounds | null
     const flowWidth = getTextFlowWidth(node.x, canvasWidth, fontSize);
     const averageCharacterWidth = Math.max(1, fontSize * 0.58);
     const charactersPerLine = Math.max(1, Math.floor(flowWidth / averageCharacterWidth));
-    const explicitLines = (node.text ?? '').split('\n');
+    const explicitLines = stripInlineFormatMarkers(node.text ?? '').split('\n');
     const wrappedLineCount = explicitLines.reduce((count, line) => {
       return count + Math.max(1, Math.ceil(line.length / charactersPerLine));
     }, 0);
@@ -230,7 +431,57 @@ function drawNode(
 
   if (node.type === 'text') {
     const fillProps = toKonvaFill(node, '#0f172a');
-    const flowWidth = getTextFlowWidth(node.x, canvasWidth, node.fontSize ?? 24);
+    const fontSize = node.fontSize ?? 24;
+    const flowWidth = getTextFlowWidth(node.x, canvasWidth, fontSize);
+    const rawText = node.text ?? '';
+    const hasInlineMarkers = rawText.includes(INLINE_BOLD_MARKER) || rawText.includes(INLINE_ITALIC_MARKER);
+
+    const textClickHandler = (event: any) => {
+      // prevent bubbling to Stage so edit isn’t interrupted by selection/background handlers
+      event.cancelBubble = true;
+      // keep selection predictable
+      const additive = event.evt.shiftKey;
+      onSelectIds(additive ? [node.id, ...selectedIds] : [node.id]);
+      if (activeTool === 'text' && !event.evt.shiftKey) {
+        onStartTextEdit(node);
+      }
+    };
+
+    if (hasInlineMarkers) {
+      const segments = parseInlineStyledText(rawText);
+      const chunks = buildStyledTextLayout(segments, flowWidth, node.fontFamily ?? 'Arial', fontSize);
+
+      return (
+        <Group
+          key={node.id}
+          id={node.id}
+          {...common}
+          visible={editingNodeId !== node.id}
+          draggable={activeTool === 'move' && !node.locked && editingNodeId !== node.id}
+          onClick={textClickHandler}
+          onTap={() => {
+            if (activeTool === 'text') {
+              onStartTextEdit(node);
+            }
+          }}
+        >
+          {chunks.map((chunk, index) => (
+            <Text
+              key={`${node.id}-chunk-${index}`}
+              x={chunk.x}
+              y={chunk.y}
+              text={chunk.text}
+              fontFamily={node.fontFamily ?? 'Arial'}
+              fontSize={fontSize}
+              fontStyle={toKonvaTextStyle(chunk.bold ? '700' : '400', chunk.italic ? 'italic' : 'normal')}
+              align={node.textAlign ?? 'left'}
+              {...fillProps}
+            />
+          ))}
+        </Group>
+      );
+    }
+
     return (
       <Text
         key={node.id}
@@ -246,16 +497,7 @@ function drawNode(
         fontSize={node.fontSize ?? 24}
         fontStyle={toKonvaTextStyle(node.fontWeight ?? '400', node.fontStyle ?? 'normal')}
         {...fillProps}
-        onClick={(event: any) => {
-          // prevent bubbling to Stage so edit isn’t interrupted by selection/background handlers
-          event.cancelBubble = true;
-          // keep selection predictable
-          const additive = event.evt.shiftKey;
-          onSelectIds(additive ? [node.id, ...selectedIds] : [node.id]);
-          if (activeTool === 'text' && !event.evt.shiftKey) {
-            onStartTextEdit(node);
-          }
-        }}
+        onClick={textClickHandler}
         onTap={() => {
           if (activeTool === 'text') {
             onStartTextEdit(node);
@@ -369,7 +611,9 @@ export function CanvasStage({
   textDefaults,
   shapeDefaults,
   onSelectIds,
-  onCanvasChange
+  onCanvasChange,
+  textFormatRequest,
+  onTextFormatRequestHandled
 }: Props) {
   const cardChromePadding = 16; // p-2 around Stage inside card frame
   const viewportPadding = 32; // p-4 around card frame in viewport area
@@ -378,6 +622,7 @@ export function CanvasStage({
   const [shiftPressed, setShiftPressed] = useState(false);
   const textEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const suppressNextBlurRef = useRef(false);
+  const processedTextFormatRequestIdRef = useRef<number | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const layerRef = useRef<any>(null);
   const transformerRef = useRef<any>(null);
@@ -582,7 +827,8 @@ export function CanvasStage({
 
     setTextEditor({
       nodeId: node.id,
-      value: node.text ?? '',
+      value: stripInlineFormatMarkers(node.text ?? ''),
+      formattedValue: node.text ?? '',
       x: node.x,
       y: node.y,
       fontFamily: node.fontFamily ?? textDefaults.fontFamily,
@@ -603,7 +849,7 @@ export function CanvasStage({
   const commitTextEdit = (discardEmpty: boolean) => {
     if (!textEditor) return;
 
-    const normalized = textEditor.value.trim();
+    const normalized = stripInlineFormatMarkers(textEditor.formattedValue).trim();
     if (discardEmpty && normalized === '') {
       onCanvasChange({
         ...canvas,
@@ -620,7 +866,7 @@ export function CanvasStage({
         node.id === textEditor.nodeId && node.type === 'text'
           ? {
               ...node,
-              text: textEditor.value,
+              text: textEditor.formattedValue,
               fontFamily: textEditor.fontFamily,
               fontSize: textEditor.fontSize,
               fontWeight: textEditor.fontWeight,
@@ -637,6 +883,67 @@ export function CanvasStage({
     });
     setTextEditor(null);
   };
+
+  const applyInlineFormatToSelection = (format: 'bold' | 'italic'): boolean => {
+    if (!textEditor || !textEditorRef.current) return false;
+
+    const input = textEditorRef.current;
+    const selectionStart = input.selectionStart ?? 0;
+    const selectionEnd = input.selectionEnd ?? 0;
+    if (selectionEnd <= selectionStart) {
+      return false;
+    }
+
+    const marker = format === 'bold' ? INLINE_BOLD_MARKER : INLINE_ITALIC_MARKER;
+    const currentValue = textEditor.formattedValue;
+    const map = buildPlainToFormattedMap(currentValue);
+    const formattedSelectionStart = map[selectionStart] ?? 0;
+    const formattedSelectionEnd = map[selectionEnd] ?? currentValue.length;
+    const canUnwrap =
+      formattedSelectionStart >= marker.length &&
+      currentValue.slice(formattedSelectionStart - marker.length, formattedSelectionStart) === marker &&
+      currentValue.slice(formattedSelectionEnd, formattedSelectionEnd + marker.length) === marker;
+
+    let nextValue = currentValue;
+
+    if (canUnwrap) {
+      nextValue =
+        currentValue.slice(0, formattedSelectionStart - marker.length) +
+        currentValue.slice(formattedSelectionStart, formattedSelectionEnd) +
+        currentValue.slice(formattedSelectionEnd + marker.length);
+    } else {
+      nextValue =
+        currentValue.slice(0, formattedSelectionStart) +
+        marker +
+        currentValue.slice(formattedSelectionStart, formattedSelectionEnd) +
+        marker +
+        currentValue.slice(formattedSelectionEnd);
+    }
+
+    const nextPlain = stripInlineFormatMarkers(nextValue);
+
+    setTextEditor((current) =>
+      current && current.nodeId === textEditor.nodeId
+        ? { ...current, value: nextPlain, formattedValue: nextValue }
+        : current
+    );
+
+    requestAnimationFrame(() => {
+      input.focus();
+      input.setSelectionRange(selectionStart, selectionEnd);
+    });
+
+    return true;
+  };
+
+  useEffect(() => {
+    if (!textFormatRequest) return;
+    if (processedTextFormatRequestIdRef.current === textFormatRequest.id) return;
+
+    processedTextFormatRequestIdRef.current = textFormatRequest.id;
+    const handled = applyInlineFormatToSelection(textFormatRequest.format);
+    onTextFormatRequestHandled?.(textFormatRequest.id, handled);
+  }, [onTextFormatRequestHandled, textFormatRequest, textEditor]);
 
   useEffect(() => {
     if (!textEditorRef.current) return;
@@ -897,9 +1204,24 @@ export function CanvasStage({
             <textarea
               ref={textEditorRef}
               value={textEditor.value}
-              onChange={(event) =>
-                setTextEditor((current) => (current ? { ...current, value: event.target.value } : current))
-              }
+              onChange={(event) => {
+                const nextPlainValue = event.target.value;
+                setTextEditor((current) => {
+                  if (!current) return current;
+
+                  const nextFormattedValue = applyPlainTextEditToFormatted(
+                    current.value,
+                    nextPlainValue,
+                    current.formattedValue
+                  );
+
+                  return {
+                    ...current,
+                    value: nextPlainValue,
+                    formattedValue: nextFormattedValue
+                  };
+                });
+              }}
               onBlur={() => {
                 if (suppressNextBlurRef.current) {
                   suppressNextBlurRef.current = false;
@@ -911,6 +1233,18 @@ export function CanvasStage({
                 commitTextEdit(true);
               }}
               onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'b') {
+                  event.preventDefault();
+                  applyInlineFormatToSelection('bold');
+                  return;
+                }
+
+                if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'i') {
+                  event.preventDefault();
+                  applyInlineFormatToSelection('italic');
+                  return;
+                }
+
                 if (event.key === 'Escape') {
                   event.preventDefault();
                   commitTextEdit(textEditor.isNew);

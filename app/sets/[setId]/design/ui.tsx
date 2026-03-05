@@ -139,6 +139,7 @@ const IMAGE_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const IMAGE_ALLOWED_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 const IMAGE_ALLOWED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
 const TEXT_RIGHT_PADDING = 16;
+const stripInlineFormatMarkers = (value: string): string => value.replace(/\*\*|_/g, '');
 
 const ICON_OPTIONS: IconOption[] = [
   { name: 'alarm-clock', label: 'Alarm Clock', Icon: AlarmClock },
@@ -349,7 +350,7 @@ const getNodeBounds = (node: CanvasNode, canvasWidth: number): NodeBounds | null
     const flowWidth = Math.max(minimumWidth, canvasWidth - node.x - TEXT_RIGHT_PADDING);
     const averageCharacterWidth = Math.max(1, fontSize * 0.58);
     const charactersPerLine = Math.max(1, Math.floor(flowWidth / averageCharacterWidth));
-    const explicitLines = (node.text ?? '').split('\n');
+    const explicitLines = stripInlineFormatMarkers(node.text ?? '').split('\n');
     const wrappedLineCount = explicitLines.reduce((count, line) => {
       return count + Math.max(1, Math.ceil(line.length / charactersPerLine));
     }, 0);
@@ -616,6 +617,7 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
   const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [imageInsertError, setImageInsertError] = useState<string | null>(null);
+  const [textFormatRequest, setTextFormatRequest] = useState<{ id: number; format: 'bold' | 'italic' } | null>(null);
   const imageFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const currentCard = cards[currentIndex];
@@ -1339,16 +1341,37 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     applyAppearanceToSelectedNodes({ fill: { color } });
   };
 
-  const handleBoldToggle = () => {
+  const toggleBoldForNodeOrDefault = () => {
     const nextWeight = textSettings.fontWeight === '400' ? '700' : '400';
     setTextSettings((previous) => ({ ...previous, fontWeight: nextWeight }));
     updateSelectedTextNodes({ fontWeight: nextWeight });
   };
 
-  const handleItalicToggle = () => {
+  const toggleItalicForNodeOrDefault = () => {
     const nextStyle = textSettings.fontStyle === 'italic' ? 'normal' : 'italic';
     setTextSettings((previous) => ({ ...previous, fontStyle: nextStyle }));
     updateSelectedTextNodes({ fontStyle: nextStyle });
+  };
+
+  const requestInlineFormat = (format: 'bold' | 'italic') => {
+    const requestId = Date.now() + Math.floor(Math.random() * 1000);
+    setTextFormatRequest({ id: requestId, format });
+  };
+
+  const handleTextFormatRequestHandled = (requestId: number, handled: boolean) => {
+    setTextFormatRequest((current) => {
+      if (!current || current.id !== requestId) return current;
+
+      if (!handled) {
+        if (current.format === 'bold') {
+          toggleBoldForNodeOrDefault();
+        } else {
+          toggleItalicForNodeOrDefault();
+        }
+      }
+
+      return null;
+    });
   };
 
   const handleTextAlignChange = (textAlign: TextAlignment) => {
@@ -1864,7 +1887,8 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
                     type="button"
                     variant={textSettings.fontWeight === '400' ? 'secondary' : 'primary'}
                     className="h-9"
-                    onClick={handleBoldToggle}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => requestInlineFormat('bold')}
                     aria-label="Toggle bold"
                   >
                     <span className="text-base font-bold">B</span>
@@ -1873,7 +1897,8 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
                     type="button"
                     variant={textSettings.fontStyle === 'italic' ? 'primary' : 'secondary'}
                     className="h-9"
-                    onClick={handleItalicToggle}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => requestInlineFormat('italic')}
                     aria-label="Toggle italic"
                   >
                     <span className="text-base italic">I</span>
@@ -2171,6 +2196,8 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
             shapeDefaults={shapeSettings}
             onSelectIds={setSelectedIds}
             onCanvasChange={(nextCanvas) => setCanvas(nextCanvas)}
+            textFormatRequest={textFormatRequest}
+            onTextFormatRequestHandled={handleTextFormatRequestHandled}
           />
         </section>
         <aside className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">

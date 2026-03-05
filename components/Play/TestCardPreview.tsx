@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Stage, Layer, Rect, Circle, Line, Text, Image as KonvaImage } from 'react-konva';
+import { Stage, Layer, Rect, Circle, Line, Text, Group, Image as KonvaImage } from 'react-konva';
 import { AnswerType, CanvasNode, CanvasState } from '@/lib/types/domain';
 import { normalizeCanvasState, toKonvaFill, toKonvaStroke } from '@/lib/utils/canvasAppearance';
 import { clozeSchema } from '@/lib/utils/answerEvaluation';
@@ -15,6 +15,8 @@ type Props = {
 const FALLBACK_CARD_WIDTH = 720;
 const TEXT_RIGHT_PADDING = 16;
 const CLOZE_TOKEN_REGEX = /{{\s*(blank|[1-9]\d*)\s*}}/gi;
+const INLINE_BOLD_MARKER = '**';
+const INLINE_ITALIC_MARKER = '_';
 
 const SUPERSCRIPT_DIGITS: Record<string, string> = {
   '0': '0',
@@ -65,6 +67,137 @@ function getTextFlowWidth(x: number, canvasWidth: number, fontSize: number): num
   return Math.max(minimumWidth, canvasWidth - x - TEXT_RIGHT_PADDING);
 }
 
+function toKonvaTextStyle(fontWeight: string, fontStyle: 'normal' | 'italic'): 'normal' | 'bold' | 'italic' | 'bold italic' {
+  const isBold = fontWeight !== '400';
+  if (isBold && fontStyle === 'italic') return 'bold italic';
+  if (isBold) return 'bold';
+  if (fontStyle === 'italic') return 'italic';
+  return 'normal';
+}
+
+function parseInlineStyledText(value: string): { text: string; bold: boolean; italic: boolean }[] {
+  const segments: { text: string; bold: boolean; italic: boolean }[] = [];
+  let index = 0;
+  let bold = false;
+  let italic = false;
+  let buffer = '';
+
+  const flush = () => {
+    if (!buffer) return;
+    segments.push({ text: buffer, bold, italic });
+    buffer = '';
+  };
+
+  while (index < value.length) {
+    if (value.startsWith(INLINE_BOLD_MARKER, index)) {
+      flush();
+      bold = !bold;
+      index += INLINE_BOLD_MARKER.length;
+      continue;
+    }
+
+    if (value[index] === INLINE_ITALIC_MARKER) {
+      flush();
+      italic = !italic;
+      index += 1;
+      continue;
+    }
+
+    buffer += value[index];
+    index += 1;
+  }
+
+  flush();
+
+  return segments.length > 0 ? segments : [{ text: '', bold: false, italic: false }];
+}
+
+function buildStyledTextLayout(
+  segments: { text: string; bold: boolean; italic: boolean }[],
+  flowWidth: number,
+  fontFamily: string,
+  fontSize: number
+): Array<{ text: string; bold: boolean; italic: boolean; x: number; y: number }> {
+  const chunks: Array<{ text: string; bold: boolean; italic: boolean; x: number; y: number }> = [];
+  const measurementContext =
+    typeof document !== 'undefined' ? document.createElement('canvas').getContext('2d') : null;
+
+  let line = 0;
+  let lineWidth = 0;
+  let chunkText = '';
+  let chunkX = 0;
+  let chunkY = 0;
+  let chunkBold = false;
+  let chunkItalic = false;
+
+  const measureTextWidth = (text: string, bold: boolean, italic: boolean): number => {
+    if (!measurementContext) {
+      return text.length * Math.max(1, fontSize * 0.58);
+    }
+
+    const styleParts: string[] = [];
+    if (italic) styleParts.push('italic');
+    if (bold) styleParts.push('700');
+    styleParts.push(`${fontSize}px`);
+    styleParts.push(fontFamily);
+    measurementContext.font = styleParts.join(' ');
+    return measurementContext.measureText(text).width;
+  };
+
+  const flushChunk = () => {
+    if (!chunkText) return;
+    chunks.push({
+      text: chunkText,
+      bold: chunkBold,
+      italic: chunkItalic,
+      x: chunkX,
+      y: chunkY
+    });
+    chunkText = '';
+  };
+
+  const beginChunk = (bold: boolean, italic: boolean) => {
+    chunkX = lineWidth;
+    chunkY = line * fontSize * 1.2;
+    chunkBold = bold;
+    chunkItalic = italic;
+  };
+
+  segments.forEach((segment) => {
+    for (const char of segment.text) {
+      if (char === '\n') {
+        flushChunk();
+        line += 1;
+        lineWidth = 0;
+        continue;
+      }
+
+      const charWidth = measureTextWidth(char, segment.bold, segment.italic);
+      if (lineWidth > 0 && lineWidth + charWidth > flowWidth) {
+        flushChunk();
+        line += 1;
+        lineWidth = 0;
+      }
+
+      if (!chunkText) {
+        beginChunk(segment.bold, segment.italic);
+      }
+
+      if (segment.bold !== chunkBold || segment.italic !== chunkItalic || chunkY !== line * fontSize * 1.2) {
+        flushChunk();
+        beginChunk(segment.bold, segment.italic);
+      }
+
+      chunkText += char;
+      lineWidth += charWidth;
+    }
+  });
+
+  flushChunk();
+
+  return chunks;
+}
+
 function renderNode(
   node: CanvasNode,
   cardWidth: number,
@@ -75,18 +208,48 @@ function renderNode(
 
   if (node.type === 'text') {
     const fillProps = toKonvaFill(node, '#0f172a');
-    const flowWidth = getTextFlowWidth(node.x, cardWidth, node.fontSize ?? 24);
+    const fontSize = node.fontSize ?? 24;
+    const flowWidth = getTextFlowWidth(node.x, cardWidth, fontSize);
+    const transformedText = textTransform(node.text ?? '');
+    const hasInlineMarkers = transformedText.includes(INLINE_BOLD_MARKER) || transformedText.includes(INLINE_ITALIC_MARKER);
+
+    if (hasInlineMarkers) {
+      const segments = parseInlineStyledText(transformedText);
+      const chunks = buildStyledTextLayout(segments, flowWidth, node.fontFamily ?? 'Arial', fontSize);
+
+      return (
+        <Group key={node.id} x={node.x} y={node.y}>
+          {chunks.map((chunk, index) => (
+            <Text
+              key={`${node.id}-chunk-${index}`}
+              x={chunk.x}
+              y={chunk.y}
+              text={chunk.text}
+              width={flowWidth}
+              wrap="word"
+              fontFamily={node.fontFamily ?? 'Arial'}
+              fontSize={fontSize}
+              align={node.textAlign ?? 'left'}
+              fontStyle={toKonvaTextStyle(chunk.bold ? '700' : '400', chunk.italic ? 'italic' : 'normal')}
+              {...fillProps}
+            />
+          ))}
+        </Group>
+      );
+    }
+
     return (
       <Text
         key={node.id}
         x={node.x}
         y={node.y}
-        text={textTransform(node.text ?? '')}
+        text={transformedText}
         width={flowWidth}
         wrap="word"
+        align={node.textAlign ?? 'left'}
         fontFamily={node.fontFamily ?? 'Arial'}
-        fontSize={node.fontSize ?? 24}
-        fontStyle={node.fontWeight === '700' ? 'bold' : 'normal'}
+        fontSize={fontSize}
+        fontStyle={toKonvaTextStyle(node.fontWeight ?? '400', node.fontStyle ?? 'normal')}
         {...fillProps}
       />
     );

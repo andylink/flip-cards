@@ -33,6 +33,12 @@ vi.mock('react-konva', () => ({
   ) {
     return <div ref={ref}>{children}</div>;
   }),
+  Group: React.forwardRef(function Group(
+    { children }: { children: React.ReactNode },
+    ref: React.ForwardedRef<HTMLDivElement>
+  ) {
+    return <div ref={ref}>{children}</div>;
+  }),
   Text: () => <div data-testid="text-node" />,
   Rect: () => <div data-testid="rect-node" />,
   Circle: () => <div data-testid="circle-node" />,
