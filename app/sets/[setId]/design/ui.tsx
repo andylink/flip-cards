@@ -354,7 +354,11 @@ const getNodeBounds = (node: CanvasNode, canvasWidth: number): NodeBounds | null
   if (node.type === 'text') {
     const fontSize = node.fontSize ?? 24;
     const minimumWidth = Math.max(96, Math.round(fontSize * 4));
-    const flowWidth = Math.max(minimumWidth, canvasWidth - node.x - TEXT_RIGHT_PADDING);
+    const fallbackWidth = Math.max(minimumWidth, canvasWidth - node.x - TEXT_RIGHT_PADDING);
+    const flowWidth =
+      typeof node.width === 'number' && Number.isFinite(node.width)
+        ? Math.max(minimumWidth, node.width)
+        : fallbackWidth;
     const averageCharacterWidth = Math.max(1, fontSize * 0.58);
     const charactersPerLine = Math.max(1, Math.floor(flowWidth / averageCharacterWidth));
     const explicitLines = stripInlineFormatMarkers(node.text ?? '').split('\n');

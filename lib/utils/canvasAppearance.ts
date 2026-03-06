@@ -81,9 +81,14 @@ export function normalizeCanvasNode(rawNode: CanvasNode): CanvasNode {
       ...DEFAULT_TEXT_FILL,
       color: legacyFillValue ?? DEFAULT_TEXT_FILL.color
     });
+    const nextWidth =
+      typeof rawNode.width === 'number' && Number.isFinite(rawNode.width)
+        ? Math.max(96, Math.round(rawNode.width))
+        : undefined;
 
     return {
       ...rawNode,
+      width: nextWidth,
       fill: nextFill
     };
   }

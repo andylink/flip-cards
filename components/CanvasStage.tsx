@@ -38,6 +38,7 @@ type TextEditorState = {
   formattedValue: string;
   x: number;
   y: number;
+  width: number;
   fontFamily: string;
   fontSize: number;
   fontWeight: string;
@@ -280,10 +281,32 @@ function toKonvaTextStyle(fontWeight: string, fontStyle: 'normal' | 'italic'): '
   return 'normal';
 }
 
-function getTextFlowWidth(x: number, canvasWidth: number, fontSize: number): number {
+function getTextFlowWidth(node: Extract<CanvasNode, { type: 'text' }>, canvasWidth: number): number {
+  const x = node.x;
+  const fontSize = node.fontSize ?? 24;
   const minimumWidth = Math.max(96, Math.round(fontSize * 4));
-  const available = Math.max(minimumWidth, canvasWidth - x - TEXT_RIGHT_PADDING);
-  return available;
+  const fallbackWidth = Math.max(minimumWidth, canvasWidth - x - TEXT_RIGHT_PADDING);
+  if (typeof node.width !== 'number' || !Number.isFinite(node.width)) {
+    return fallbackWidth;
+  }
+
+  return Math.max(minimumWidth, node.width);
+}
+
+function getTextBoundsSize(node: Extract<CanvasNode, { type: 'text' }>, canvasWidth: number): { width: number; height: number } {
+  const fontSize = node.fontSize ?? 24;
+  const flowWidth = getTextFlowWidth(node, canvasWidth);
+  const averageCharacterWidth = Math.max(1, fontSize * 0.58);
+  const charactersPerLine = Math.max(1, Math.floor(flowWidth / averageCharacterWidth));
+  const explicitLines = stripInlineFormatMarkers(node.text ?? '').split('\n');
+  const wrappedLineCount = explicitLines.reduce((count, line) => {
+    return count + Math.max(1, Math.ceil(line.length / charactersPerLine));
+  }, 0);
+
+  return {
+    width: flowWidth,
+    height: Math.max(fontSize * 1.2, wrappedLineCount * fontSize * 1.2)
+  };
 }
 
 function getNodeBounds(node: CanvasNode, canvasWidth: number): NodeBounds | null {
@@ -333,19 +356,12 @@ function getNodeBounds(node: CanvasNode, canvasWidth: number): NodeBounds | null
   }
 
   if (node.type === 'text') {
-    const fontSize = node.fontSize ?? 24;
-    const flowWidth = getTextFlowWidth(node.x, canvasWidth, fontSize);
-    const averageCharacterWidth = Math.max(1, fontSize * 0.58);
-    const charactersPerLine = Math.max(1, Math.floor(flowWidth / averageCharacterWidth));
-    const explicitLines = stripInlineFormatMarkers(node.text ?? '').split('\n');
-    const wrappedLineCount = explicitLines.reduce((count, line) => {
-      return count + Math.max(1, Math.ceil(line.length / charactersPerLine));
-    }, 0);
+    const boundsSize = getTextBoundsSize(node, canvasWidth);
     return {
       x: node.x,
       y: node.y,
-      width: flowWidth,
-      height: Math.max(fontSize * 1.2, wrappedLineCount * fontSize * 1.2)
+      width: boundsSize.width,
+      height: boundsSize.height
     };
   }
 
@@ -436,7 +452,9 @@ function drawNode(
   if (node.type === 'text') {
     const fillProps = toKonvaFill(node, '#0f172a');
     const fontSize = node.fontSize ?? 24;
-    const flowWidth = getTextFlowWidth(node.x, canvasWidth, fontSize);
+    const textBounds = getTextBoundsSize(node, canvasWidth);
+    const flowWidth = textBounds.width;
+    const minimumWidth = Math.max(96, Math.round(fontSize * 4));
     const rawText = node.text ?? '';
     const hasInlineMarkers = rawText.includes(INLINE_BOLD_MARKER) || rawText.includes(INLINE_ITALIC_MARKER);
 
@@ -447,6 +465,20 @@ function drawNode(
       if (activeTool === 'text' && !event.evt.shiftKey && nextSelection[0] === node.id) {
         onStartTextEdit(node);
       }
+    };
+
+    const handleTextTransformEnd = (event: any) => {
+      const target = event.target;
+      const nextWidth = Math.max(minimumWidth, Math.round(flowWidth * Math.abs(target.scaleX())));
+      target.scaleX(1);
+      target.scaleY(1);
+
+      onResize(node.id, {
+        ...node,
+        x: snapToGrid(target.x(), GRID),
+        y: snapToGrid(target.y(), GRID),
+        width: snapToGrid(nextWidth, GRID)
+      });
     };
 
     if (hasInlineMarkers) {
@@ -466,6 +498,7 @@ function drawNode(
               onStartTextEdit(node);
             }
           }}
+          onTransformEnd={handleTextTransformEnd}
         >
           {chunks.map((chunk, index) => (
             <Text
@@ -505,6 +538,7 @@ function drawNode(
             onStartTextEdit(node);
           }
         }}
+        onTransformEnd={handleTextTransformEnd}
       />
     );
   }
@@ -726,14 +760,21 @@ export function CanvasStage({
           ? crypto.randomUUID()
           : `text-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
+      const nextX = snapToGrid(pointer.x / scale, GRID);
+      const nextY = snapToGrid(pointer.y / scale, GRID);
+      const nextFontSize = textDefaults.fontSize;
+      const minimumWidth = Math.max(96, Math.round(nextFontSize * 4));
+      const defaultWidth = Math.max(minimumWidth, canvas.width - nextX - TEXT_RIGHT_PADDING);
+
       const textNode: CanvasNode = {
         id: textId,
         type: 'text',
-        x: snapToGrid(pointer.x / scale, GRID),
-        y: snapToGrid(pointer.y / scale, GRID),
+        x: nextX,
+        y: nextY,
+        width: defaultWidth,
         text: '',
         fontFamily: textDefaults.fontFamily,
-        fontSize: textDefaults.fontSize,
+        fontSize: nextFontSize,
         fontWeight: textDefaults.fontWeight,
         fontStyle: textDefaults.fontStyle,
         textAlign: textDefaults.textAlign,
@@ -902,12 +943,15 @@ export function CanvasStage({
   const beginTextEdit = (node: CanvasNode, isNew = false) => {
     if (node.type !== 'text') return;
 
+    const flowWidth = getTextFlowWidth(node, canvas.width);
+
     setTextEditor({
       nodeId: node.id,
       value: stripInlineFormatMarkers(node.text ?? ''),
       formattedValue: node.text ?? '',
       x: node.x,
       y: node.y,
+      width: flowWidth,
       fontFamily: node.fontFamily ?? textDefaults.fontFamily,
       fontSize: node.fontSize ?? textDefaults.fontSize,
       fontWeight: node.fontWeight ?? textDefaults.fontWeight,
@@ -944,6 +988,7 @@ export function CanvasStage({
           ? {
               ...node,
               text: textEditor.formattedValue,
+              width: textEditor.width,
               fontFamily: textEditor.fontFamily,
               fontSize: textEditor.fontSize,
               fontWeight: textEditor.fontWeight,
@@ -1047,6 +1092,7 @@ export function CanvasStage({
 
       const nextEditor = {
         ...current,
+        width: getTextFlowWidth(activeNode, canvas.width),
         fontFamily: activeNode.fontFamily ?? textDefaults.fontFamily,
         fontSize: activeNode.fontSize ?? textDefaults.fontSize,
         fontWeight: activeNode.fontWeight ?? textDefaults.fontWeight,
@@ -1056,6 +1102,7 @@ export function CanvasStage({
       };
 
       if (
+        nextEditor.width === current.width &&
         nextEditor.fontFamily === current.fontFamily &&
         nextEditor.fontSize === current.fontSize &&
         nextEditor.fontWeight === current.fontWeight &&
@@ -1068,7 +1115,7 @@ export function CanvasStage({
 
       return nextEditor;
     });
-  }, [canvas.nodes, textDefaults, textEditor]);
+  }, [canvas.nodes, canvas.width, textDefaults, textEditor]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1137,15 +1184,14 @@ export function CanvasStage({
     [activeTool, canvas.nodes, canvas.width, selectedIds, textEditor?.nodeId]
   );
 
-  const textEditorFlowWidth = textEditor
-    ? getTextFlowWidth(textEditor.x, canvas.width, textEditor.fontSize)
-    : 0;
+  const textEditorFlowWidth = textEditor?.width ?? 0;
 
-  const selectedShapeNode = useMemo(() => {
+  const selectedTransformNode = useMemo(() => {
     if (activeTool !== 'select' || selectedIds.length !== 1) return null;
     const selectedNode = canvas.nodes.find((node) => node.id === selectedIds[0]);
     if (!selectedNode) return null;
     if (
+      selectedNode.type !== 'text' &&
       selectedNode.type !== 'rect' &&
       selectedNode.type !== 'circle' &&
       selectedNode.type !== 'line' &&
@@ -1163,13 +1209,13 @@ export function CanvasStage({
     if (typeof transformer.nodes !== 'function' || typeof layer.findOne !== 'function') return;
     if (typeof layer.batchDraw !== 'function') return;
 
-    if (!selectedShapeNode) {
+    if (!selectedTransformNode) {
       transformer.nodes([]);
       layer.batchDraw();
       return;
     }
 
-    const selectedKonvaNode = layer.findOne(`#${selectedShapeNode.id}`);
+    const selectedKonvaNode = layer.findOne(`#${selectedTransformNode.id}`);
     if (!selectedKonvaNode) {
       transformer.nodes([]);
       layer.batchDraw();
@@ -1178,7 +1224,7 @@ export function CanvasStage({
 
     transformer.nodes([selectedKonvaNode]);
     layer.batchDraw();
-  }, [selectedShapeNode, shiftPressed]);
+  }, [selectedTransformNode, shiftPressed]);
 
   return (
     <div className="space-y-3">
@@ -1245,15 +1291,21 @@ export function CanvasStage({
                 }
               )
             )}
-            {selectedShapeNode ? (
+            {selectedTransformNode ? (
               <Transformer
                 ref={transformerRef}
                 rotateEnabled={false}
-                keepRatio={selectedShapeNode.type === 'circle' || selectedShapeNode.type === 'image' || shiftPressed}
+                keepRatio={selectedTransformNode.type === 'circle' || selectedTransformNode.type === 'image' || shiftPressed}
                 flipEnabled={false}
+                enabledAnchors={
+                  selectedTransformNode.type === 'text'
+                    ? ['middle-left', 'middle-right']
+                    : undefined
+                }
                 boundBoxFunc={(oldBox: any, newBox: any) => {
-                  const minSize = 8;
-                  if (Math.abs(newBox.width) < minSize || Math.abs(newBox.height) < minSize) {
+                  const minTextWidth = 96;
+                  const minSize = selectedTransformNode.type === 'text' ? minTextWidth : 8;
+                  if (Math.abs(newBox.width) < minSize || Math.abs(newBox.height) < 8) {
                     return oldBox;
                   }
                   return newBox;

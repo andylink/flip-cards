@@ -72,9 +72,16 @@ function toClozePreviewText(template: string): string {
   return output;
 }
 
-function getTextFlowWidth(x: number, canvasWidth: number, fontSize: number): number {
+function getTextFlowWidth(node: Extract<CanvasNode, { type: 'text' }>, canvasWidth: number): number {
+  const x = node.x;
+  const fontSize = node.fontSize ?? 24;
   const minimumWidth = Math.max(96, Math.round(fontSize * 4));
-  return Math.max(minimumWidth, canvasWidth - x - TEXT_RIGHT_PADDING);
+  const fallbackWidth = Math.max(minimumWidth, canvasWidth - x - TEXT_RIGHT_PADDING);
+  if (typeof node.width !== 'number' || !Number.isFinite(node.width)) {
+    return fallbackWidth;
+  }
+
+  return Math.max(minimumWidth, node.width);
 }
 
 function toKonvaTextStyle(fontWeight: string, fontStyle: 'normal' | 'italic'): 'normal' | 'bold' | 'italic' | 'bold italic' {
@@ -219,7 +226,7 @@ function renderNode(
   if (node.type === 'text') {
     const fillProps = toKonvaFill(node, '#0f172a');
     const fontSize = node.fontSize ?? 24;
-    const flowWidth = getTextFlowWidth(node.x, cardWidth, fontSize);
+    const flowWidth = getTextFlowWidth(node, cardWidth);
     const sourceText = node.text ?? '';
     const transformedText = textTransform(sourceText);
     // Detect markers from the authored text so cloze preview underscores render as literal blanks.
