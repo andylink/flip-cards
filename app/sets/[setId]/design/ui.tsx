@@ -2246,14 +2246,7 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
           />
         </section>
         <aside className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <section className="space-y-2 rounded-md border border-slate-200 p-3 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Canvas Sizing</h3>
-            <p>The canvas is now auto-sized for portrait layouts and scaled responsively to the current viewport.</p>
-            <p>
-              Limits: {CANVAS_MIN_WIDTH}-{Math.min(canvasBounds.maxWidth, MOBILE_SAFE_CANVAS_MAX_WIDTH)}px wide and{' '}
-              {Math.max(CANVAS_MIN_HEIGHT, CANVAS_MIN_WIDTH)}-{Math.min(canvasBounds.maxHeight, MOBILE_SAFE_CANVAS_MAX_HEIGHT)}px tall.
-            </p>
-          </section>
+        
 
           <section className="space-y-2 rounded-md border border-slate-200 p-3 dark:border-slate-700">
             <h2 className="text-sm font-semibold">Answer Builder</h2>
