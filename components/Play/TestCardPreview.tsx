@@ -220,8 +220,10 @@ function renderNode(
     const fillProps = toKonvaFill(node, '#0f172a');
     const fontSize = node.fontSize ?? 24;
     const flowWidth = getTextFlowWidth(node.x, cardWidth, fontSize);
-    const transformedText = textTransform(node.text ?? '');
-    const hasInlineMarkers = transformedText.includes(INLINE_BOLD_MARKER) || transformedText.includes(INLINE_ITALIC_MARKER);
+    const sourceText = node.text ?? '';
+    const transformedText = textTransform(sourceText);
+    // Detect markers from the authored text so cloze preview underscores render as literal blanks.
+    const hasInlineMarkers = sourceText.includes(INLINE_BOLD_MARKER) || sourceText.includes(INLINE_ITALIC_MARKER);
 
     if (hasInlineMarkers) {
       const segments = parseInlineStyledText(transformedText);
