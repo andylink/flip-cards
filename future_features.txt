@@ -1,0 +1,18 @@
+Undo/redo history with a visible timeline
+Layers panel (reorder, lock, hide, group, rename objects)
+Smart guides + snapping (to center, edges, spacing between objects)
+Multi-select alignment/distribution (left/center/right, equal spacing)
+Copy/paste style and default style presets for text/shapes/icons
+Grid controls (toggle, spacing, opacity) plus optional “snap strength”
+Text quality-of-life improvements:
+line-height, letter spacing, list support
+auto-fit text box and overflow warning
+full rich-text toolbar instead of only inline markers
+Crop/mask for images (fit, fill, focal point, rounded corners)
+Reusable components/symbols (edit once, update all instances)
+Page/card templates (study deck layouts, title/definition pattern, etc.)
+Accessibility checks (contrast warnings against background colors)
+Export polish:
+    “safe area”/bleed guides
+    export at 1x/2x/print DPI
+    batch export by selected card

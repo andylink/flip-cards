@@ -57,4 +57,27 @@ describe('AnswerWidget', () => {
 
     expect(onSubmit).toHaveBeenCalledWith({ indices: [0, 1] });
   });
+
+  it('renders cloze blanks from named placeholders and submits responses by order', async () => {
+    const onSubmit = vi.fn();
+    render(
+      <AnswerWidget
+        answerType="cloze"
+        schemaJson={{
+          template: 'Energy comes from {{ATP}} and is stored in {{mitochondria}}.',
+          blanks: [{ accepted: ['ATP'] }, { accepted: ['mitochondria'] }]
+        }}
+        onSubmit={onSubmit}
+      />
+    );
+
+    expect(screen.getByText('Blank 1')).toBeInTheDocument();
+    expect(screen.getByText('Blank 2')).toBeInTheDocument();
+
+    await userEvent.type(screen.getByPlaceholderText('Enter answer for blank 1'), 'ATP');
+    await userEvent.type(screen.getByPlaceholderText('Enter answer for blank 2'), 'mitochondria');
+    await userEvent.click(screen.getByRole('button', { name: 'Submit' }));
+
+    expect(onSubmit).toHaveBeenCalledWith({ values: ['ATP', 'mitochondria'] });
+  });
 });

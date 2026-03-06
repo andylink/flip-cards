@@ -23,7 +23,16 @@ export const clozeSchema = z.object({
   )
 });
 
-const CLOZE_TOKEN_REGEX = /{{\s*(blank|[1-9]\d*)\s*}}/gi;
+const CLOZE_TOKEN_REGEX = /{{\s*([^{}]+?)\s*}}/g;
+
+const LEGACY_CLOZE_PLACEHOLDER_REGEX = /^(blank|[1-9]\d*)$/i;
+
+export type ClozePlaceholder = {
+  token: string;
+  value: string;
+  start: number;
+  end: number;
+};
 
 export const dropdownSchema = z.object({
   questions: z.array(
@@ -100,23 +109,71 @@ export function evaluateAnswer(type: AnswerType, schemaJson: unknown, responseJs
 }
 
 export function clozeTokens(template: string): string[] {
-  return Array.from(template.matchAll(CLOZE_TOKEN_REGEX)).map((token) => token[0]);
+  return clozePlaceholders(template).map((placeholder) => placeholder.token);
 }
 
-export function clozePlaceholderIds(template: string): number[] {
-  const matches = Array.from(template.matchAll(CLOZE_TOKEN_REGEX));
-  const orderedUniqueIds: number[] = [];
-  const seen = new Set<number>();
-  let nextLegacyId = 1;
+export function clozePlaceholders(template: string): ClozePlaceholder[] {
+  const placeholders: ClozePlaceholder[] = [];
 
-  for (const match of matches) {
-    const raw = (match[1] ?? '').toLowerCase();
-    const id = raw === 'blank' ? nextLegacyId++ : Number(raw);
-    if (!Number.isInteger(id) || id <= 0) continue;
-    if (seen.has(id)) continue;
-    seen.add(id);
-    orderedUniqueIds.push(id);
+  for (const match of template.matchAll(CLOZE_TOKEN_REGEX)) {
+    const token = match[0] ?? '';
+    const value = (match[1] ?? '').trim();
+    const start = match.index ?? 0;
+
+    placeholders.push({
+      token,
+      value,
+      start,
+      end: start + token.length
+    });
   }
 
-  return orderedUniqueIds;
+  return placeholders;
+}
+
+const getClozePlaceholderDefaultAccepted = (value: string): string =>
+  LEGACY_CLOZE_PLACEHOLDER_REGEX.test(value) ? '' : value;
+
+export function hydrateClozeAcceptedByBlank(template: string, acceptedByBlank: string[]): string[] {
+  const placeholders = clozePlaceholders(template);
+
+  return placeholders.map((placeholder, index) => {
+    const accepted = acceptedByBlank[index] ?? '';
+    return accepted.trim() ? accepted : getClozePlaceholderDefaultAccepted(placeholder.value);
+  });
+}
+
+export function remapClozeAcceptedByPlaceholder(
+  previousTemplate: string,
+  nextTemplate: string,
+  previousAcceptedByBlank: string[]
+): string[] {
+  const previousPlaceholders = clozePlaceholders(previousTemplate);
+  const nextPlaceholders = clozePlaceholders(nextTemplate);
+  const acceptedQueuesByToken = new Map<string, string[]>();
+
+  previousPlaceholders.forEach((placeholder, index) => {
+    const key = placeholder.value.toLowerCase();
+    const accepted = previousAcceptedByBlank[index] ?? '';
+    const fallback = getClozePlaceholderDefaultAccepted(placeholder.value);
+    const nextAccepted = accepted.trim() ? accepted : fallback;
+    const queue = acceptedQueuesByToken.get(key);
+
+    if (queue) {
+      queue.push(nextAccepted);
+      return;
+    }
+
+    acceptedQueuesByToken.set(key, [nextAccepted]);
+  });
+
+  return nextPlaceholders.map((placeholder) => {
+    const key = placeholder.value.toLowerCase();
+    const queue = acceptedQueuesByToken.get(key);
+    if (queue && queue.length > 0) {
+      return queue.shift() ?? '';
+    }
+
+    return getClozePlaceholderDefaultAccepted(placeholder.value);
+  });
 }

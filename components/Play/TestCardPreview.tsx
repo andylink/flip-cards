@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Stage, Layer, Rect, Circle, Line, Text, Group, Image as KonvaImage } from 'react-konva';
 import { AnswerType, CanvasNode, CanvasState } from '@/lib/types/domain';
 import { normalizeCanvasState, toKonvaFill, toKonvaStroke } from '@/lib/utils/canvasAppearance';
-import { clozeSchema } from '@/lib/utils/answerEvaluation';
+import { clozePlaceholders, clozeSchema } from '@/lib/utils/answerEvaluation';
 
 type Props = {
   canvas: CanvasState;
@@ -14,7 +14,6 @@ type Props = {
 
 const FALLBACK_CARD_WIDTH = 720;
 const TEXT_RIGHT_PADDING = 16;
-const CLOZE_TOKEN_REGEX = /{{\s*(blank|[1-9]\d*)\s*}}/gi;
 const INLINE_BOLD_MARKER = '**';
 const INLINE_ITALIC_MARKER = '_';
 
@@ -51,15 +50,26 @@ function toSuperscript(value: number): string {
 }
 
 function toClozePreviewText(template: string): string {
-  let legacyBlankIndex = 1;
-  return template.replace(CLOZE_TOKEN_REGEX, (_, token: string) => {
-    const normalized = (token ?? '').toLowerCase();
-    const placeholderId = normalized === 'blank' ? legacyBlankIndex++ : Number(normalized);
-    if (!Number.isInteger(placeholderId) || placeholderId <= 0) {
-      return '_______';
+  const placeholders = clozePlaceholders(template);
+  if (placeholders.length === 0) return template;
+
+  let cursor = 0;
+  let output = '';
+
+  placeholders.forEach((placeholder, index) => {
+    if (placeholder.start > cursor) {
+      output += template.slice(cursor, placeholder.start);
     }
-    return `_______${toSuperscript(placeholderId)}`;
+
+    output += `_______${toSuperscript(index + 1)}`;
+    cursor = placeholder.end;
   });
+
+  if (cursor < template.length) {
+    output += template.slice(cursor);
+  }
+
+  return output;
 }
 
 function getTextFlowWidth(x: number, canvasWidth: number, fontSize: number): number {

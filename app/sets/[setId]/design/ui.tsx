@@ -51,7 +51,14 @@ import { Select } from '@/components/Common/Select';
 import { Button } from '@/components/Common/Button';
 import { Input } from '@/components/Common/Input';
 import { Modal } from '@/components/Common/Modal';
-import { clozePlaceholderIds, clozeSchema, dropdownSchema, freeFormSchema, mcqSchema } from '@/lib/utils/answerEvaluation';
+import {
+  clozeSchema,
+  dropdownSchema,
+  freeFormSchema,
+  hydrateClozeAcceptedByBlank,
+  mcqSchema,
+  remapClozeAcceptedByPlaceholder
+} from '@/lib/utils/answerEvaluation';
 import { CANVAS_MIN_HEIGHT, CANVAS_MIN_WIDTH, clampPortraitCanvasSize } from '@/lib/utils/canvas';
 import { CanvasAppearanceDefaults, getNodeFillColor, normalizeCanvasState } from '@/lib/utils/canvasAppearance';
 import { z } from 'zod';
@@ -447,22 +454,6 @@ const createDefaultDraft = (): AnswerDraft => ({
   }
 });
 
-const remapAcceptedByPlaceholder = (
-  previousTemplate: string,
-  nextTemplate: string,
-  previousAcceptedByBlank: string[]
-): string[] => {
-  const previousIds = clozePlaceholderIds(previousTemplate);
-  const nextIds = clozePlaceholderIds(nextTemplate);
-  const acceptedById = new Map<number, string>();
-
-  previousIds.forEach((id, index) => {
-    acceptedById.set(id, previousAcceptedByBlank[index] ?? '');
-  });
-
-  return nextIds.map((id) => acceptedById.get(id) ?? '');
-};
-
 const toEditorDraft = (type: AnswerType, schemaJson: unknown): AnswerDraft => {
   const base = createDefaultDraft();
 
@@ -494,9 +485,10 @@ const toEditorDraft = (type: AnswerType, schemaJson: unknown): AnswerDraft => {
   if (type === 'cloze') {
     const parsed = clozeSchema.safeParse(schemaJson);
     if (parsed.success) {
+      const persistedAccepted = parsed.data.blanks.map((blank) => blank.accepted.join(','));
       base.cloze = {
         template: parsed.data.template,
-        acceptedByBlank: parsed.data.blanks.map((blank) => blank.accepted.join(',')),
+        acceptedByBlank: hydrateClozeAcceptedByBlank(parsed.data.template, persistedAccepted),
         sourceNodeId: null
       };
     }
@@ -529,9 +521,10 @@ const toPersistedSchema = (type: AnswerType, draft: AnswerDraft): unknown => {
   }
 
   if (type === 'cloze') {
+    const acceptedByBlank = hydrateClozeAcceptedByBlank(draft.cloze.template, draft.cloze.acceptedByBlank);
     return {
       template: draft.cloze.template,
-      blanks: draft.cloze.acceptedByBlank
+      blanks: acceptedByBlank
         .filter((value) => value !== undefined)
         .map((accepted) => ({
           accepted: accepted
@@ -1490,7 +1483,7 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
       cloze: {
         ...prev.cloze,
         template: nextTemplate,
-        acceptedByBlank: remapAcceptedByPlaceholder(prev.cloze.template, nextTemplate, prev.cloze.acceptedByBlank)
+        acceptedByBlank: remapClozeAcceptedByPlaceholder(prev.cloze.template, nextTemplate, prev.cloze.acceptedByBlank)
       }
     }));
     setAnswerLastModifiedAt(Date.now());
@@ -1506,7 +1499,7 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
         ...prev.cloze,
         sourceNodeId: selectedTextNode.id,
         template: nextTemplate,
-        acceptedByBlank: remapAcceptedByPlaceholder(prev.cloze.template, nextTemplate, prev.cloze.acceptedByBlank)
+        acceptedByBlank: remapClozeAcceptedByPlaceholder(prev.cloze.template, nextTemplate, prev.cloze.acceptedByBlank)
       }
     }));
     setAnswerLastModifiedAt(Date.now());
@@ -2250,7 +2243,7 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
             {answerType === 'cloze' ? (
               <div className="space-y-2">
                 <div className="space-y-2 rounded-md border border-slate-200 p-2 text-xs text-slate-600 dark:border-slate-700 dark:text-slate-300">
-                  <p>Write placeholders in your card text as {`{{1}}`}, {`{{2}}`} and link that text node here.</p>
+                  <p>Write cloze words in your card text as {`{{mitochondria}}`} and link that text node here.</p>
                   <p>Selected text nodes: {textNodes.length}</p>
                   {clozeSourceNode ? (
                     <p className="rounded bg-slate-100 px-2 py-1 text-slate-700 dark:bg-slate-800 dark:text-slate-200">

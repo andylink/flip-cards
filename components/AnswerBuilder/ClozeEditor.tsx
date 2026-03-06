@@ -1,7 +1,11 @@
 'use client';
 
 import { Input } from '@/components/Common/Input';
-import { clozePlaceholderIds } from '@/lib/utils/answerEvaluation';
+import {
+  clozePlaceholders,
+  hydrateClozeAcceptedByBlank,
+  remapClozeAcceptedByPlaceholder
+} from '@/lib/utils/answerEvaluation';
 
 type Props = {
   template: string;
@@ -10,24 +14,9 @@ type Props = {
   templateLocked?: boolean;
 };
 
-const remapAcceptedByPlaceholder = (
-  previousTemplate: string,
-  nextTemplate: string,
-  previousAcceptedByBlank: string[]
-) => {
-  const previousIds = clozePlaceholderIds(previousTemplate);
-  const nextIds = clozePlaceholderIds(nextTemplate);
-  const previousById = new Map<number, string>();
-
-  previousIds.forEach((id, index) => {
-    previousById.set(id, previousAcceptedByBlank[index] ?? '');
-  });
-
-  return nextIds.map((id) => previousById.get(id) ?? '');
-};
-
 export function ClozeEditor({ template, acceptedByBlank, onChange, templateLocked = false }: Props) {
-  const placeholderIds = clozePlaceholderIds(template);
+  const placeholders = clozePlaceholders(template);
+  const hydratedAcceptedByBlank = hydrateClozeAcceptedByBlank(template, acceptedByBlank);
 
   return (
     <div className="space-y-2">
@@ -37,24 +26,26 @@ export function ClozeEditor({ template, acceptedByBlank, onChange, templateLocke
         onChange={(e) =>
           onChange({
             template: e.target.value,
-            acceptedByBlank: remapAcceptedByPlaceholder(template, e.target.value, acceptedByBlank)
+            acceptedByBlank: remapClozeAcceptedByPlaceholder(template, e.target.value, hydratedAcceptedByBlank)
           })
         }
-        placeholder="Example: DNA is {{1}}"
+        placeholder="Example: DNA is {{double helix}}"
         disabled={templateLocked}
       />
-      <p className="text-xs text-slate-500">Use placeholders like {`{{1}}`}, {`{{2}}`} in the prompt text.</p>
-      {placeholderIds.map((placeholderId, index) => (
+      <p className="text-xs text-slate-500">
+        Use placeholders like {`{{mitochondria}}`} or {`{{double helix}}`} in the prompt text.
+      </p>
+      {placeholders.map((placeholder, index) => (
         <Input
-          key={placeholderId}
-          aria-label={`Accepted answers blank ${placeholderId}`}
-          value={acceptedByBlank[index] ?? ''}
+          key={`${placeholder.start}-${placeholder.end}-${index}`}
+          aria-label={`Accepted answers blank ${index + 1}`}
+          value={hydratedAcceptedByBlank[index] ?? ''}
           onChange={(e) => {
-            const next = [...acceptedByBlank];
+            const next = [...hydratedAcceptedByBlank];
             next[index] = e.target.value;
             onChange({ template, acceptedByBlank: next });
           }}
-          placeholder={`Blank ${placeholderId}: answer1,answer2`}
+          placeholder={`Blank ${index + 1} (from {{${placeholder.value}}}): answer1,answer2`}
         />
       ))}
     </div>
