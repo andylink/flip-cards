@@ -75,7 +75,7 @@ export function PlayClient({ setId, setTitle, initialCards, userId }: Props) {
 
     registerEvaluation(pending.correct, scoreDelta);
     advanceProgress();
-    setFeedback(pending.correct ? 'Correct!' : 'Incorrect');
+    setFeedback('');
     setPending(null);
 
     setIndex((value) => value + 1);
@@ -116,6 +116,7 @@ export function PlayClient({ setId, setTitle, initialCards, userId }: Props) {
         <section className="space-y-4 rounded-md border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
           <h2 className="text-lg font-semibold">Answer</h2>
           <AnswerWidget
+            key={current.id}
             answerType={answer.type}
             schemaJson={answer.schema_json}
             onSubmit={(response) => {
