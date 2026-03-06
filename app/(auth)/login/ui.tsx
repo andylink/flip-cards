@@ -1,16 +1,17 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Input } from '@/components/Common/Input';
 import { Button } from '@/components/Common/Button';
 
 export function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const [mode, setMode] = useState<'signin' | 'signup'>(searchParams.get('mode') === 'signup' ? 'signup' : 'signin');
   const [status, setStatus] = useState('');
 
   const authRedirectUrl = `${(process.env.NEXT_PUBLIC_SITE_URL ?? window.location.origin).replace(/\/$/, '')}/auth/callback`;
@@ -30,7 +31,7 @@ export function LoginForm() {
       }
 
       setStatus('Signed in successfully. Redirecting...');
-      router.push('/');
+      router.push('/dashboard');
       router.refresh();
       return;
     }

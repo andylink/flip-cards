@@ -1,13 +1,28 @@
 import './globals.css';
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
+import { createClient } from '@/lib/supabase/server';
 
 export const metadata: Metadata = {
   title: 'FlipForge',
   description: 'Design and test custom learning flip-cards.'
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const supabase = await createClient();
+  const {
+    data: { user }
+  } = await supabase.auth.getUser();
+
+  async function signOutAction() {
+    'use server';
+
+    const supabase = await createClient();
+    await supabase.auth.signOut();
+    redirect('/');
+  }
+
   return (
     <html lang="en">
       <body className="min-h-screen">
@@ -18,6 +33,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </Link>
             <nav className="flex items-center gap-4 text-sm">
               <Link className="focus-ring rounded px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800" href="/">
+                Home
+              </Link>
+              <Link className="focus-ring rounded px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800" href="/dashboard">
                 Dashboard
               </Link>
               <Link
@@ -26,6 +44,20 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               >
                 New Set
               </Link>
+              {user ? (
+                <form action={signOutAction}>
+                  <button
+                    className="focus-ring rounded px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    type="submit"
+                  >
+                    Sign Out
+                  </button>
+                </form>
+              ) : (
+                <Link className="focus-ring rounded px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800" href="/login">
+                  Log In
+                </Link>
+              )}
             </nav>
           </div>
         </header>

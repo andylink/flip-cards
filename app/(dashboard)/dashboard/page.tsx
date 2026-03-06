@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-import { HoldToDeleteSetButton } from './HoldToDeleteSetButton';
+import { HoldToDeleteSetButton } from '../HoldToDeleteSetButton';
 
 export default async function DashboardPage() {
   const supabase = await createClient();
