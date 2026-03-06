@@ -88,6 +88,7 @@ export function normalizeCanvasNode(rawNode: CanvasNode): CanvasNode {
 
     return {
       ...rawNode,
+      hideInPlay: rawNode.hideInPlay === true,
       width: nextWidth,
       fill: nextFill
     };

@@ -224,6 +224,8 @@ function renderNode(
   if (node.hidden) return null;
 
   if (node.type === 'text') {
+    if (node.hideInPlay) return null;
+
     const fillProps = toKonvaFill(node, '#0f172a');
     const fontSize = node.fontSize ?? 24;
     const flowWidth = getTextFlowWidth(node, cardWidth);

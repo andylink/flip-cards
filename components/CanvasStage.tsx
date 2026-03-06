@@ -309,6 +309,45 @@ function getTextBoundsSize(node: Extract<CanvasNode, { type: 'text' }>, canvasWi
   };
 }
 
+function drawTextPlayVisibilityIndicator(node: Extract<CanvasNode, { type: 'text' }>, canvasWidth: number) {
+  if (node.hidden) return null;
+
+  const bounds = getTextBoundsSize(node, canvasWidth);
+  const indicatorWidth = 16;
+  const indicatorHeight = 12;
+  const x = node.x + Math.max(0, bounds.width - indicatorWidth - 2);
+  const y = node.y + 2;
+  const isHiddenInPlay = node.hideInPlay === true;
+
+  return (
+    <Group key={`play-visibility-${node.id}`} x={x} y={y} listening={false}>
+      <Rect
+        x={0}
+        y={0}
+        width={indicatorWidth}
+        height={indicatorHeight}
+        cornerRadius={3}
+        fill={isHiddenInPlay ? '#fee2e2' : '#dcfce7'}
+        stroke={isHiddenInPlay ? '#f87171' : '#4ade80'}
+        strokeWidth={1}
+      />
+      <Line
+        points={[2, 6, 8, 3, 14, 6, 8, 9, 2, 6]}
+        stroke={isHiddenInPlay ? '#991b1b' : '#166534'}
+        strokeWidth={1.2}
+        lineCap="round"
+        lineJoin="round"
+        closed
+      />
+      {!isHiddenInPlay ? (
+        <Circle x={8} y={6} radius={1.6} fill="#166534" />
+      ) : (
+        <Line points={[3, 9, 13, 3]} stroke="#991b1b" strokeWidth={1.2} lineCap="round" />
+      )}
+    </Group>
+  );
+}
+
 function getNodeBounds(node: CanvasNode, canvasWidth: number): NodeBounds | null {
   if (node.hidden) return null;
 
@@ -773,6 +812,7 @@ export function CanvasStage({
         y: nextY,
         width: defaultWidth,
         text: '',
+        hideInPlay: false,
         fontFamily: textDefaults.fontFamily,
         fontSize: nextFontSize,
         fontWeight: textDefaults.fontWeight,
@@ -1290,6 +1330,9 @@ export function CanvasStage({
                   });
                 }
               )
+            )}
+            {canvas.nodes.map((node) =>
+              node.type === 'text' ? drawTextPlayVisibilityIndicator(node, canvas.width) : null
             )}
             {selectedTransformNode ? (
               <Transformer

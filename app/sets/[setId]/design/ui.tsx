@@ -16,6 +16,8 @@ import {
   Code2,
   Compass,
   Dumbbell,
+  Eye,
+  EyeOff,
   FileText,
   FlaskConical,
   Globe,
@@ -1476,6 +1478,26 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     }
   };
 
+  const setSelectedTextHideInPlay = (hideInPlay: boolean) => {
+    const selected = new Set(selectedIds);
+    if (selected.size === 0) return;
+
+    let hasChanges = false;
+    const nextNodes = canvas.nodes.map((node) => {
+      if (!selected.has(node.id) || node.type !== 'text') return node;
+      if ((node.hideInPlay === true) === hideInPlay) return node;
+      hasChanges = true;
+      return {
+        ...node,
+        hideInPlay
+      };
+    });
+
+    if (hasChanges) {
+      setCanvas({ ...canvas, nodes: nextNodes });
+    }
+  };
+
   const applyAppearanceToSelectedNodes = (updates: {
     fill?: Partial<{ enabled: boolean; color: string; opacity: number }>;
     stroke?: Partial<{ enabled: boolean; color: string; width: number; opacity: number }>;
@@ -1669,6 +1691,17 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     () => canvas.nodes.filter((node): node is Extract<CanvasNode, { type: 'text' }> => node.type === 'text'),
     [canvas.nodes]
   );
+
+  const selectedTextNodes = useMemo(
+    () =>
+      canvas.nodes.filter(
+        (node): node is Extract<CanvasNode, { type: 'text' }> => selectedIds.includes(node.id) && node.type === 'text'
+      ),
+    [canvas.nodes, selectedIds]
+  );
+
+  const selectedTextNodesAllHiddenInPlay =
+    selectedTextNodes.length > 0 && selectedTextNodes.every((node) => node.hideInPlay === true);
 
   const filteredIconOptions = useMemo(() => {
     const query = iconSearchQuery.trim().toLowerCase();
@@ -2301,6 +2334,24 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
                 </>
               ) : null}
             </div>
+            {selectedTextNodes.length > 0 ? (
+              <div className="space-y-2 rounded-md border border-slate-200 p-2 dark:border-slate-700">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Play visibility</p>
+                <Button
+                  variant={selectedTextNodesAllHiddenInPlay ? 'danger' : 'secondary'}
+                  className="w-full"
+                  onClick={() => setSelectedTextHideInPlay(!selectedTextNodesAllHiddenInPlay)}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    {selectedTextNodesAllHiddenInPlay ? <EyeOff size={14} aria-hidden={true} /> : <Eye size={14} aria-hidden={true} />}
+                    {selectedTextNodesAllHiddenInPlay ? 'Hidden In Play' : 'Shown In Play'}
+                  </span>
+                </Button>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Text always stays visible in design mode.
+                </p>
+              </div>
+            ) : null}
             {activeTool === 'select' ? (
               <div className="space-y-2">
                 <div className="grid grid-cols-3 gap-2 rounded-md border border-slate-200 p-2 dark:border-slate-700">

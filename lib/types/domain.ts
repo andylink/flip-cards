@@ -28,6 +28,7 @@ type CanvasNodeBase = {
 export type TextNode = CanvasNodeBase & {
   type: 'text';
   text?: string;
+  hideInPlay?: boolean;
   width?: number;
   fontFamily?: string;
   fontSize?: number;
