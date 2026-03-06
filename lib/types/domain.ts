@@ -103,6 +103,7 @@ export interface CardRecord {
   id: string;
   set_id: string;
   title: string;
+  question_text: string;
   canvas_json: CanvasState;
   order_index: number;
 }

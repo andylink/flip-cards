@@ -33,6 +33,26 @@ describe('AnswerWidget', () => {
     expect(screen.getByLabelText('B')).toBeInTheDocument();
   });
 
+  it('submits original mcq choice index when shuffle is enabled', async () => {
+    const onSubmit = vi.fn();
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+
+    render(
+      <AnswerWidget
+        answerType="mcq"
+        schemaJson={{ choices: ['A', 'B', 'C'], correctIndex: 1, shuffle: true }}
+        onSubmit={onSubmit}
+      />
+    );
+
+    const choiceB = screen.getByLabelText('B');
+    await userEvent.click(choiceB);
+    await userEvent.click(screen.getByRole('button', { name: 'Submit' }));
+
+    expect(onSubmit).toHaveBeenCalledWith({ selectedIndex: 1 });
+    randomSpy.mockRestore();
+  });
+
   it('renders dropdown questions and submits selected indices', async () => {
     const onSubmit = vi.fn();
     render(

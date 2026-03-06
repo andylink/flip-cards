@@ -24,7 +24,7 @@ export default async function PlayPage({ params }: { params: { setId: string } }
 
   const { data: cards } = await supabase
     .from('cards')
-    .select('id,title,canvas_json,order_index,answers(type,schema_json)')
+    .select('id,title,question_text,canvas_json,order_index,answers(type,schema_json)')
     .eq('set_id', setId);
 
   return <PlayClient setId={setId} setTitle={setData.title} initialCards={cards ?? []} userId={user?.id ?? null} />;

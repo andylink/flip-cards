@@ -18,23 +18,45 @@ export function AnswerWidget({ answerType, schemaJson, onSubmit }: Props) {
   const [clozeValues, setClozeValues] = useState<string[]>([]);
   const [dropdownValues, setDropdownValues] = useState<number[]>([]);
 
+  const mcqChoiceOrder = useMemo(() => {
+    if (answerType !== 'mcq') return [] as number[];
+
+    const parsed = mcqSchema.parse(schemaJson);
+    const order = parsed.choices.map((_, index) => index);
+
+    if (!parsed.shuffle) {
+      return order;
+    }
+
+    for (let index = order.length - 1; index > 0; index -= 1) {
+      const randomIndex = Math.floor(Math.random() * (index + 1));
+      [order[index], order[randomIndex]] = [order[randomIndex], order[index]];
+    }
+
+    return order;
+  }, [answerType, schemaJson]);
+
   const content = useMemo(() => {
     if (answerType === 'mcq') {
       const parsed = mcqSchema.parse(schemaJson);
       return (
         <div className="space-y-2">
-          {parsed.choices.map((choice, index) => (
-            <label className="flex items-center gap-2" key={choice}>
+          {mcqChoiceOrder.map((sourceIndex) => {
+            const choice = parsed.choices[sourceIndex];
+
+            return (
+              <label className="flex items-center gap-2" key={`${choice}-${sourceIndex}`}>
               <input
                 className="focus-ring"
                 type="radio"
-                checked={mcqSelected === index}
-                onChange={() => setMcqSelected(index)}
+                checked={mcqSelected === sourceIndex}
+                onChange={() => setMcqSelected(sourceIndex)}
                 name="mcq"
               />
               <span>{choice}</span>
             </label>
-          ))}
+            );
+          })}
           <Button onClick={() => onSubmit({ selectedIndex: mcqSelected })}>Submit</Button>
         </div>
       );
@@ -132,7 +154,7 @@ export function AnswerWidget({ answerType, schemaJson, onSubmit }: Props) {
         <Button onClick={() => onSubmit({ value: freeForm })}>Submit</Button>
       </div>
     );
-  }, [answerType, schemaJson, freeForm, mcqSelected, clozeValues, dropdownValues, onSubmit]);
+  }, [answerType, schemaJson, freeForm, mcqSelected, clozeValues, dropdownValues, onSubmit, mcqChoiceOrder]);
 
   return <section aria-live="polite">{content}</section>;
 }

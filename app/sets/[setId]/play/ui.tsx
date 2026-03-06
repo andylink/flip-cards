@@ -11,6 +11,7 @@ import { AnswerType, CanvasState } from '@/lib/types/domain';
 type CardWithAnswer = {
   id: string;
   title: string;
+  question_text: string;
   canvas_json: CanvasState;
   answers: { type: AnswerType; schema_json: unknown }[];
 };
@@ -114,7 +115,10 @@ export function PlayClient({ setId, setTitle, initialCards, userId }: Props) {
         </section>
 
         <section className="space-y-4 rounded-md border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
-          <h2 className="text-lg font-semibold">Answer</h2>
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold">Question</h2>
+            <p className="text-sm text-slate-700 dark:text-slate-200">{current.question_text?.trim() || 'Question'}</p>
+          </div>
           <AnswerWidget
             key={current.id}
             answerType={answer.type}

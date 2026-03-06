@@ -13,12 +13,13 @@ values (
 )
 on conflict (id) do nothing;
 
-insert into public.cards (id, set_id, title, canvas_json, order_index)
+insert into public.cards (id, set_id, title, question_text, canvas_json, order_index)
 values
 (
   '20000000-0000-0000-0000-000000000001',
   '10000000-0000-0000-0000-000000000001',
   'Cell Organelle',
+  'What organelle is the powerhouse of the cell?',
   '{"width":1024,"height":576,"nodes":[{"id":"n1","type":"text","x":120,"y":110,"text":"What organelle is the powerhouse of the cell?","fontSize":40,"fill":"#0f172a"}]}'::jsonb,
   0
 ),
@@ -26,6 +27,7 @@ values
   '20000000-0000-0000-0000-000000000002',
   '10000000-0000-0000-0000-000000000001',
   'DNA Expansion',
+  'DNA stands for what?',
   '{"width":1024,"height":576,"nodes":[{"id":"n2","type":"text","x":140,"y":120,"text":"DNA stands for _____.","fontSize":44,"fill":"#0f172a"}]}'::jsonb,
   1
 ),
@@ -33,6 +35,7 @@ values
   '20000000-0000-0000-0000-000000000003',
   '10000000-0000-0000-0000-000000000001',
   'Cell Type',
+  'Plants have what type of walls?',
   '{"width":1024,"height":576,"nodes":[{"id":"n3","type":"text","x":130,"y":100,"text":"Plants have _____ walls.","fontSize":44,"fill":"#0f172a"}]}'::jsonb,
   2
 )

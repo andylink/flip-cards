@@ -436,6 +436,21 @@ type AnswerDraft = {
   dropdown: DropdownEditorState;
 };
 
+const normalizeMcqChoices = (choices: string[]): string[] => {
+  const normalized = choices.map((choice) => choice.trim()).filter((choice) => choice.length > 0);
+
+  if (normalized.length >= 2) {
+    return normalized;
+  }
+
+  return [...normalized, ...Array.from({ length: 2 - normalized.length }, () => '')];
+};
+
+const clampCorrectIndex = (correctIndex: number, choicesLength: number): number => {
+  if (choicesLength <= 0) return 0;
+  return Math.max(0, Math.min(correctIndex, choicesLength - 1));
+};
+
 const createDefaultDraft = (): AnswerDraft => ({
   freeform: {
     accepted: '',
@@ -477,9 +492,10 @@ const toEditorDraft = (type: AnswerType, schemaJson: unknown): AnswerDraft => {
   if (type === 'mcq') {
     const parsed = mcqSchema.safeParse(schemaJson);
     if (parsed.success) {
+      const normalizedChoices = normalizeMcqChoices(parsed.data.choices);
       base.mcq = {
-        choices: parsed.data.choices,
-        correctIndex: parsed.data.correctIndex,
+        choices: normalizedChoices,
+        correctIndex: clampCorrectIndex(parsed.data.correctIndex, normalizedChoices.length),
         shuffle: parsed.data.shuffle
       };
     }
@@ -517,9 +533,10 @@ const toEditorDraft = (type: AnswerType, schemaJson: unknown): AnswerDraft => {
 
 const toPersistedSchema = (type: AnswerType, draft: AnswerDraft): unknown => {
   if (type === 'mcq') {
+    const normalizedChoices = normalizeMcqChoices(draft.mcq.choices);
     return {
-      choices: draft.mcq.choices,
-      correctIndex: draft.mcq.correctIndex,
+      choices: normalizedChoices,
+      correctIndex: clampCorrectIndex(draft.mcq.correctIndex, normalizedChoices.length),
       shuffle: draft.mcq.shuffle
     };
   }
@@ -596,6 +613,8 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
   const [answerType, setAnswerType] = useState<AnswerType>('freeform');
   const [answerDraft, setAnswerDraft] = useState<AnswerDraft>(createDefaultDraft());
   const [answerLastModifiedAt, setAnswerLastModifiedAt] = useState<number | null>(null);
+  const [questionDraft, setQuestionDraft] = useState('');
+  const [questionLastModifiedAt, setQuestionLastModifiedAt] = useState<number | null>(null);
   const [activeColorModal, setActiveColorModal] = useState<ColorModalTarget>(null);
   const [savedAssets, setSavedAssets] = useState<SavedAssetRecord[]>([]);
   const [selectedSavedAssetId, setSelectedSavedAssetId] = useState('');
@@ -711,6 +730,8 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
       setAnswerType('freeform');
       setAnswerDraft(createDefaultDraft());
       setAnswerLastModifiedAt(null);
+      setQuestionDraft('');
+      setQuestionLastModifiedAt(null);
       return;
     }
 
@@ -719,6 +740,8 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     setAnswerType(nextType);
     setAnswerDraft(existing ? toEditorDraft(nextType, existing.schema_json) : createDefaultDraft());
     setAnswerLastModifiedAt(null);
+    setQuestionDraft(currentCard.question_text ?? '');
+    setQuestionLastModifiedAt(null);
   }, [currentCard?.id]);
 
   useEffect(() => {
@@ -781,6 +804,24 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
 
     return () => clearTimeout(timeout);
   }, [answerDraft, answerLastModifiedAt, answerType, currentCard, supabase]);
+
+  useEffect(() => {
+    if (!currentCard || !questionLastModifiedAt) return;
+
+    const timeout = setTimeout(async () => {
+      const { error } = await supabase
+        .from('cards')
+        .update({ question_text: questionDraft })
+        .eq('id', currentCard.id)
+        .eq('set_id', setId);
+
+      if (!error) {
+        setQuestionLastModifiedAt(null);
+      }
+    }, 1200);
+
+    return () => clearTimeout(timeout);
+  }, [currentCard, questionDraft, questionLastModifiedAt, setId, supabase]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -866,8 +907,14 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     const baseCanvas = createCanvas(normalizedDefault.width, normalizedDefault.height);
     const { data } = await supabase
       .from('cards')
-      .insert({ set_id: setId, title: `Card ${orderIndex + 1}`, canvas_json: baseCanvas, order_index: orderIndex })
-      .select('id,title,canvas_json,order_index,set_id')
+      .insert({
+        set_id: setId,
+        title: `Card ${orderIndex + 1}`,
+        question_text: '',
+        canvas_json: baseCanvas,
+        order_index: orderIndex
+      })
+      .select('id,title,question_text,canvas_json,order_index,set_id')
       .single();
 
     if (data) {
@@ -888,10 +935,11 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
       .insert({
         set_id: setId,
         title: duplicateTitle,
+        question_text: currentCard.question_text ?? '',
         canvas_json: duplicatedCanvas,
         order_index: orderIndex
       })
-      .select('id,title,canvas_json,order_index,set_id')
+      .select('id,title,question_text,canvas_json,order_index,set_id')
       .single();
 
     if (!duplicatedCard) return;
@@ -2209,6 +2257,23 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
 
           <section className="space-y-2 rounded-md border border-slate-200 p-3 dark:border-slate-700">
             <h2 className="text-sm font-semibold">Answer Builder</h2>
+            <Input
+              value={questionDraft}
+              onChange={(event) => {
+                const nextQuestion = event.target.value;
+                setQuestionDraft(nextQuestion);
+                setQuestionLastModifiedAt(Date.now());
+                if (!currentCard) return;
+
+                setCards((prev) =>
+                  prev.map((card) =>
+                    card.id === currentCard.id ? { ...card, question_text: nextQuestion } : card
+                  )
+                );
+              }}
+              placeholder="Question shown during play/test"
+              aria-label="Card question"
+            />
             <Select
               value={answerType}
               onChange={(event) => {
