@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Input } from '@/components/Common/Input';
 import { Button } from '@/components/Common/Button';
 
@@ -12,12 +13,17 @@ type DropdownQuestion = {
 type Props = {
   questions: DropdownQuestion[];
   onChange: (next: { questions: DropdownQuestion[] }) => void;
+  savedOptionSets: Array<{ id: string; name: string }>;
+  isLoadingSavedOptionSets: boolean;
+  savedOptionSetsError: string | null;
+  onRequestSaveOptionSet: (questionIndex: number) => void;
+  onApplySavedOptionSet: (questionIndex: number, optionSetId: string) => void;
 };
 
 const createQuestion = (): DropdownQuestion => ({
   prompt: '',
   optionsCsv: '',
-  correctIndex: 0
+  correctIndex: -1
 });
 
 const parseOptions = (optionsCsv: string) =>
@@ -26,7 +32,37 @@ const parseOptions = (optionsCsv: string) =>
     .map((item) => item.trim())
     .filter(Boolean);
 
-export function DropdownEditor({ questions, onChange }: Props) {
+const normalizeCorrectIndex = (correctIndex: number, optionsLength: number): number => {
+  if (!Number.isInteger(correctIndex) || correctIndex < 0 || correctIndex >= optionsLength) {
+    return -1;
+  }
+
+  return correctIndex;
+};
+
+export function DropdownEditor({
+  questions,
+  onChange,
+  savedOptionSets,
+  isLoadingSavedOptionSets,
+  savedOptionSetsError,
+  onRequestSaveOptionSet,
+  onApplySavedOptionSet
+}: Props) {
+  const [selectedOptionSetByQuestion, setSelectedOptionSetByQuestion] = useState<Record<number, string>>({});
+
+  useEffect(() => {
+    setSelectedOptionSetByQuestion((previous) => {
+      const next: Record<number, string> = {};
+      questions.forEach((_, index) => {
+        if (previous[index]) {
+          next[index] = previous[index];
+        }
+      });
+      return next;
+    });
+  }, [questions]);
+
   const updateQuestion = (index: number, nextQuestion: DropdownQuestion) => {
     const nextQuestions = [...questions];
     nextQuestions[index] = nextQuestion;
@@ -37,8 +73,7 @@ export function DropdownEditor({ questions, onChange }: Props) {
     <div className="space-y-3">
       {questions.map((question, index) => {
         const options = parseOptions(question.optionsCsv);
-        const maxCorrectIndex = Math.max(options.length - 1, 0);
-        const safeCorrectIndex = Math.min(question.correctIndex, maxCorrectIndex);
+        const safeCorrectIndex = normalizeCorrectIndex(question.correctIndex, options.length);
 
         return (
           <div className="space-y-2 rounded border border-slate-200 p-2 dark:border-slate-700" key={index}>
@@ -55,7 +90,7 @@ export function DropdownEditor({ questions, onChange }: Props) {
                 updateQuestion(index, {
                   ...question,
                   optionsCsv: e.target.value,
-                  correctIndex: Math.min(question.correctIndex, Math.max(nextOptions.length - 1, 0))
+                  correctIndex: normalizeCorrectIndex(question.correctIndex, nextOptions.length)
                 });
               }}
               placeholder="Option 1, Option 2, Option 3"
@@ -70,6 +105,7 @@ export function DropdownEditor({ questions, onChange }: Props) {
                 }}
                 aria-label={`Question ${index + 1} correct option`}
               >
+                <option value={-1}>Select correct answer</option>
                 {options.map((option, optionIndex) => (
                   <option key={`${option}-${optionIndex}`} value={optionIndex}>
                     {`Correct: ${option}`}
@@ -81,6 +117,56 @@ export function DropdownEditor({ questions, onChange }: Props) {
                 Add comma-separated options to set the correct answer.
               </p>
             )}
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+              <select
+                className="focus-ring w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+                value={selectedOptionSetByQuestion[index] ?? ''}
+                onChange={(event) => {
+                  const optionSetId = event.target.value;
+                  setSelectedOptionSetByQuestion((previous) => ({
+                    ...previous,
+                    [index]: optionSetId
+                  }));
+                }}
+                aria-label={`Question ${index + 1} saved options`}
+                disabled={savedOptionSets.length === 0 || isLoadingSavedOptionSets}
+              >
+                <option value="">
+                  {savedOptionSets.length === 0 ? 'No saved option sets' : 'Choose saved option set'}
+                </option>
+                {savedOptionSets.map((optionSet) => (
+                  <option key={optionSet.id} value={optionSet.id}>
+                    {optionSet.name}
+                  </option>
+                ))}
+              </select>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  const selectedOptionSetId = selectedOptionSetByQuestion[index];
+                  if (!selectedOptionSetId) return;
+                  onApplySavedOptionSet(index, selectedOptionSetId);
+                }}
+                disabled={!selectedOptionSetByQuestion[index] || savedOptionSets.length === 0 || isLoadingSavedOptionSets}
+              >
+                Apply Saved
+              </Button>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => onRequestSaveOptionSet(index)}
+              disabled={options.length === 0}
+            >
+              Save Options for Reuse
+            </Button>
+            {isLoadingSavedOptionSets ? (
+              <p className="text-xs text-slate-500 dark:text-slate-400">Loading saved option sets...</p>
+            ) : null}
+            {savedOptionSetsError ? (
+              <p className="text-xs text-rose-600 dark:text-rose-400">{savedOptionSetsError}</p>
+            ) : null}
             <Button
               type="button"
               variant="ghost"

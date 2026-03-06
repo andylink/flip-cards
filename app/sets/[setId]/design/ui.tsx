@@ -272,6 +272,13 @@ type SavedAssetRecord = {
   created_at: string;
 };
 
+type SavedDropdownOptionSetRecord = {
+  id: string;
+  name: string;
+  options_json: string[];
+  created_at: string;
+};
+
 const createNodeId = (prefix = 'node'): string => {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID();
@@ -405,7 +412,7 @@ const dropdownEditorSchema = z
       z.object({
         prompt: z.string().default(''),
         options: z.array(z.string()).default([]),
-        correctIndex: z.number().int().min(0).default(0)
+        correctIndex: z.number().int().min(-1).default(-1)
       })
     )
   })
@@ -416,7 +423,7 @@ const dropdownEditorSchema = z
         blanks: z.array(
           z.object({
             options: z.array(z.string()).default([]),
-            correctIndex: z.number().int().min(0).default(0)
+            correctIndex: z.number().int().min(-1).default(-1)
           })
         )
       })
@@ -624,6 +631,14 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
   const [assetNameDraft, setAssetNameDraft] = useState('');
   const [isSavingAsset, setIsSavingAsset] = useState(false);
   const [saveAssetError, setSaveAssetError] = useState<string | null>(null);
+  const [savedDropdownOptionSets, setSavedDropdownOptionSets] = useState<SavedDropdownOptionSetRecord[]>([]);
+  const [isLoadingSavedDropdownOptionSets, setIsLoadingSavedDropdownOptionSets] = useState(false);
+  const [savedDropdownOptionSetsError, setSavedDropdownOptionSetsError] = useState<string | null>(null);
+  const [isSaveDropdownOptionSetModalOpen, setIsSaveDropdownOptionSetModalOpen] = useState(false);
+  const [dropdownOptionSetNameDraft, setDropdownOptionSetNameDraft] = useState('');
+  const [isSavingDropdownOptionSet, setIsSavingDropdownOptionSet] = useState(false);
+  const [saveDropdownOptionSetError, setSaveDropdownOptionSetError] = useState<string | null>(null);
+  const [pendingDropdownOptionSetQuestionIndex, setPendingDropdownOptionSetQuestionIndex] = useState<number | null>(null);
   const [isIconPickerOpen, setIsIconPickerOpen] = useState(false);
   const [iconSearchQuery, setIconSearchQuery] = useState('');
   const [iconSize, setIconSize] = useState(96);
@@ -901,6 +916,63 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
     };
   }, [setId, supabase]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadSavedDropdownOptionSets = async () => {
+      setIsLoadingSavedDropdownOptionSets(true);
+      setSavedDropdownOptionSetsError(null);
+
+      const { data, error } = await supabase
+        .from('set_dropdown_option_sets')
+        .select('id,name,options_json,created_at')
+        .eq('set_id', setId)
+        .order('created_at', { ascending: false });
+
+      if (!isMounted) return;
+
+      if (error) {
+        setSavedDropdownOptionSets([]);
+        setSavedDropdownOptionSetsError(error.message);
+        setIsLoadingSavedDropdownOptionSets(false);
+        return;
+      }
+
+      const nextOptionSets = (data ?? []).flatMap((optionSet) => {
+        const options = optionSet.options_json;
+        if (!Array.isArray(options)) {
+          return [] as SavedDropdownOptionSetRecord[];
+        }
+
+        const normalizedOptions = options
+          .map((value) => String(value).trim())
+          .filter(Boolean);
+
+        if (normalizedOptions.length === 0) {
+          return [] as SavedDropdownOptionSetRecord[];
+        }
+
+        return [
+          {
+            id: optionSet.id,
+            name: optionSet.name,
+            options_json: normalizedOptions,
+            created_at: optionSet.created_at
+          }
+        ];
+      });
+
+      setSavedDropdownOptionSets(nextOptionSets);
+      setIsLoadingSavedDropdownOptionSets(false);
+    };
+
+    void loadSavedDropdownOptionSets();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [setId, supabase]);
+
   const addCard = async () => {
     const orderIndex = cards.length;
     const normalizedDefault = normalizeCanvasSize(DEFAULT_PORTRAIT_CANVAS);
@@ -1073,6 +1145,128 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
       nodes: [...canvas.nodes, nextNode]
     });
     setSelectedIds([nextNodeId]);
+  };
+
+  const openSaveDropdownOptionSetModal = (questionIndex: number) => {
+    const question = answerDraft.dropdown.questions[questionIndex];
+    if (!question) return;
+
+    const parsedOptions = question.optionsCsv
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    if (parsedOptions.length === 0) {
+      setSaveDropdownOptionSetError('Add at least one option before saving.');
+      return;
+    }
+
+    setPendingDropdownOptionSetQuestionIndex(questionIndex);
+    setDropdownOptionSetNameDraft(question.prompt.trim() || `Option Set ${savedDropdownOptionSets.length + 1}`);
+    setSaveDropdownOptionSetError(null);
+    setIsSaveDropdownOptionSetModalOpen(true);
+  };
+
+  const closeSaveDropdownOptionSetModal = () => {
+    if (isSavingDropdownOptionSet) return;
+    setIsSaveDropdownOptionSetModalOpen(false);
+    setDropdownOptionSetNameDraft('');
+    setPendingDropdownOptionSetQuestionIndex(null);
+    setSaveDropdownOptionSetError(null);
+  };
+
+  const saveDropdownOptionSet = async () => {
+    if (pendingDropdownOptionSetQuestionIndex === null) {
+      setSaveDropdownOptionSetError('Select a dropdown question before saving.');
+      return;
+    }
+
+    const question = answerDraft.dropdown.questions[pendingDropdownOptionSetQuestionIndex];
+    if (!question) {
+      setSaveDropdownOptionSetError('Selected dropdown question is no longer available.');
+      return;
+    }
+
+    const trimmedName = dropdownOptionSetNameDraft.trim();
+    if (!trimmedName) {
+      setSaveDropdownOptionSetError('Option set name is required.');
+      return;
+    }
+
+    const normalizedOptions = question.optionsCsv
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    if (normalizedOptions.length === 0) {
+      setSaveDropdownOptionSetError('Add at least one option before saving.');
+      return;
+    }
+
+    setIsSavingDropdownOptionSet(true);
+    setSaveDropdownOptionSetError(null);
+
+    const { data, error } = await supabase
+      .from('set_dropdown_option_sets')
+      .insert({
+        set_id: setId,
+        name: trimmedName,
+        options_json: normalizedOptions
+      })
+      .select('id,name,options_json,created_at')
+      .single();
+
+    setIsSavingDropdownOptionSet(false);
+
+    if (error || !data) {
+      setSaveDropdownOptionSetError(error?.message ?? 'Unable to save option set.');
+      return;
+    }
+
+    const nextOptionSet: SavedDropdownOptionSetRecord = {
+      id: data.id,
+      name: data.name,
+      options_json: normalizedOptions,
+      created_at: data.created_at
+    };
+
+    setSavedDropdownOptionSets((previous) => [nextOptionSet, ...previous]);
+    setIsSaveDropdownOptionSetModalOpen(false);
+    setDropdownOptionSetNameDraft('');
+    setPendingDropdownOptionSetQuestionIndex(null);
+    setSaveDropdownOptionSetError(null);
+  };
+
+  const applySavedDropdownOptionSetToQuestion = (questionIndex: number, optionSetId: string) => {
+    const optionSet = savedDropdownOptionSets.find((item) => item.id === optionSetId);
+    if (!optionSet) return;
+
+    setAnswerDraft((previous) => {
+      const existingQuestion = previous.dropdown.questions[questionIndex];
+      if (!existingQuestion) return previous;
+
+      const nextQuestion = {
+        ...existingQuestion,
+        prompt: optionSet.name,
+        optionsCsv: optionSet.options_json.join(', '),
+        // Saved option sets intentionally do not carry a correct answer.
+        // Force re-selection so we do not silently pick the first option.
+        correctIndex: -1
+      };
+
+      const nextQuestions = [...previous.dropdown.questions];
+      nextQuestions[questionIndex] = nextQuestion;
+
+      return {
+        ...previous,
+        dropdown: {
+          ...previous.dropdown,
+          questions: nextQuestions
+        }
+      };
+    });
+
+    setAnswerLastModifiedAt(Date.now());
   };
 
   const closeIconPicker = () => {
@@ -2353,6 +2547,14 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
                   setAnswerDraft((prev) => ({ ...prev, dropdown: next }));
                   setAnswerLastModifiedAt(Date.now());
                 }}
+                savedOptionSets={savedDropdownOptionSets.map((optionSet) => ({
+                  id: optionSet.id,
+                  name: optionSet.name
+                }))}
+                isLoadingSavedOptionSets={isLoadingSavedDropdownOptionSets}
+                savedOptionSetsError={savedDropdownOptionSetsError}
+                onRequestSaveOptionSet={openSaveDropdownOptionSetModal}
+                onApplySavedOptionSet={applySavedDropdownOptionSetToQuestion}
               />
             ) : null}
           </section>
@@ -2436,6 +2638,55 @@ export function DesignClient({ setId, setTitle, initialCards }: Props) {
             </Button>
             <Button variant="primary" onClick={() => void saveSelectedAsset()} disabled={isSavingAsset}>
               {isSavingAsset ? 'Saving...' : 'Save asset'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+      <Modal
+        open={isSaveDropdownOptionSetModalOpen}
+        title="Save Dropdown Option Set"
+        onClose={closeSaveDropdownOptionSetModal}
+      >
+        <div className="space-y-3">
+          <Input
+            value={dropdownOptionSetNameDraft}
+            onChange={(event) => {
+              setDropdownOptionSetNameDraft(event.target.value);
+              if (saveDropdownOptionSetError) setSaveDropdownOptionSetError(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                void saveDropdownOptionSet();
+              }
+
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                closeSaveDropdownOptionSetModal();
+              }
+            }}
+            placeholder="Option set name"
+            aria-label="Option set name"
+            autoFocus
+            disabled={isSavingDropdownOptionSet}
+          />
+          {saveDropdownOptionSetError ? (
+            <p className="text-sm text-rose-600 dark:text-rose-400">{saveDropdownOptionSetError}</p>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={closeSaveDropdownOptionSetModal}
+              disabled={isSavingDropdownOptionSet}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => void saveDropdownOptionSet()}
+              disabled={isSavingDropdownOptionSet}
+            >
+              {isSavingDropdownOptionSet ? 'Saving...' : 'Save option set'}
             </Button>
           </div>
         </div>

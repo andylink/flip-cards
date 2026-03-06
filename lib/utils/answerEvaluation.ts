@@ -39,7 +39,7 @@ export const dropdownSchema = z.object({
     z.object({
       prompt: z.string(),
       options: z.array(z.string()).min(2),
-      correctIndex: z.number().int().min(0)
+      correctIndex: z.number().int().min(-1)
     })
   )
 }).or(
@@ -50,7 +50,7 @@ export const dropdownSchema = z.object({
       blanks: z.array(
         z.object({
           options: z.array(z.string()).min(2),
-          correctIndex: z.number().int().min(0)
+          correctIndex: z.number().int().min(-1)
         })
       )
     })
