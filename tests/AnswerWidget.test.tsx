@@ -71,9 +71,17 @@ describe('AnswerWidget', () => {
     expect(screen.getByText('Type of vessel')).toBeInTheDocument();
     expect(screen.getByText('Vessel length')).toBeInTheDocument();
 
+    const submitButton = screen.getByRole('button', { name: 'Submit' });
+    expect(submitButton).toBeDisabled();
+
     const selects = screen.getAllByRole('combobox');
+    await userEvent.selectOptions(selects[0], '0');
+    expect(submitButton).toBeDisabled();
+
     await userEvent.selectOptions(selects[1], '1');
-    await userEvent.click(screen.getByRole('button', { name: 'Submit' }));
+    expect(submitButton).toBeEnabled();
+
+    await userEvent.click(submitButton);
 
     expect(onSubmit).toHaveBeenCalledWith({ indices: [0, 1] });
   });

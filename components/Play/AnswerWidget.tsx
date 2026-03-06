@@ -16,7 +16,7 @@ export function AnswerWidget({ answerType, schemaJson, onSubmit }: Props) {
   const [freeForm, setFreeForm] = useState('');
   const [mcqSelected, setMcqSelected] = useState(0);
   const [clozeValues, setClozeValues] = useState<string[]>([]);
-  const [dropdownValues, setDropdownValues] = useState<number[]>([]);
+  const [dropdownValues, setDropdownValues] = useState<Array<number | null>>([]);
 
   const mcqChoiceOrder = useMemo(() => {
     if (answerType !== 'mcq') return [] as number[];
@@ -119,7 +119,16 @@ export function AnswerWidget({ answerType, schemaJson, onSubmit }: Props) {
 
     if (answerType === 'dropdown') {
       const parsed = dropdownSchema.parse(schemaJson);
-      const selectedIndices = parsed.questions.map((_, index) => dropdownValues[index] ?? 0);
+      const selectedIndices = parsed.questions.map((_, index) => dropdownValues[index] ?? null);
+      const allSelected = selectedIndices.every((selectedIndex) => selectedIndex !== null);
+
+      const handleSubmit = () => {
+        if (!allSelected) {
+          return;
+        }
+
+        onSubmit({ indices: selectedIndices.map((selectedIndex) => selectedIndex as number) });
+      };
 
       return (
         <div className="space-y-2">
@@ -128,13 +137,16 @@ export function AnswerWidget({ answerType, schemaJson, onSubmit }: Props) {
               <p className="text-sm font-medium">{question.prompt || `Question ${index + 1}`}</p>
               <select
                 className="focus-ring w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
-                value={selectedIndices[index]}
+                value={selectedIndices[index] ?? ''}
                 onChange={(e) => {
                   const next = [...dropdownValues];
-                  next[index] = Number(e.target.value);
+                  next[index] = e.target.value === '' ? null : Number(e.target.value);
                   setDropdownValues(next);
                 }}
               >
+                <option value="" disabled>
+                  Select an answer
+                </option>
                 {question.options.map((option, optionIndex) => (
                   <option key={`${option}-${optionIndex}`} value={optionIndex}>
                     {option}
@@ -143,7 +155,9 @@ export function AnswerWidget({ answerType, schemaJson, onSubmit }: Props) {
               </select>
             </div>
           ))}
-          <Button onClick={() => onSubmit({ indices: selectedIndices })}>Submit</Button>
+          <Button onClick={handleSubmit} disabled={!allSelected}>
+            Submit
+          </Button>
         </div>
       );
     }
